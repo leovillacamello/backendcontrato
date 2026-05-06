@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+contrato_gerado.docx
+.venv/
+venv/
