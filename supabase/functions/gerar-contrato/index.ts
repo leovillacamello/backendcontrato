@@ -445,23 +445,25 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
 
   const rowModelo = xml.substring(trStart, trEnd);
 
-  // Normaliza rPr da linha modelo: remove sz/szCs explícitos e força centralização
+  // Normaliza rPr da linha modelo: remove sz/szCs e rFonts explícitos e força centralização
   let rowNorm = rowModelo
     .replace(/<w:sz\b[^>]*\/>/g, "")
-    .replace(/<w:szCs\b[^>]*\/>/g, "");
+    .replace(/<w:szCs\b[^>]*\/>/g, "")
+    .replace(/<w:rFonts\b[^>]*\/>/g, "");
 
   // Substitui qualquer jc existente por center; depois adiciona center em pPr sem jc
   rowNorm = rowNorm.replace(/<w:jc\b[^>]*\/>/g, '<w:jc w:val="center"/>');
   rowNorm = rowNorm.replace(/(<w:pPr>)([\s\S]*?)(<\/w:pPr>)/g, (m, open, content, close) =>
     content.includes("<w:jc ") ? m : open + content + '<w:jc w:val="center"/>' + close
   );
-  // Força fonte 12pt (24 meios-pontos) em todos os runs da linha
+  // Força Calibri 12pt em todos os runs da linha
+  const fonteCalibri = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="24"/><w:szCs w:val="24"/>';
   rowNorm = rowNorm.replace(/(<w:rPr>)([\s\S]*?)(<\/w:rPr>)/g, (m, open, content, close) =>
-    open + content + '<w:sz w:val="24"/><w:szCs w:val="24"/>' + close
+    open + content + fonteCalibri + close
   );
-  // Runs sem rPr: insere rPr com fonte 12pt antes de <w:t>
+  // Runs sem rPr: insere rPr com Calibri 12pt antes de <w:t>
   rowNorm = rowNorm.replace(/(<w:r\b[^>]*>)(?![\s\S]{0,50}<w:rPr)(<w:t)/g,
-    '$1<w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>$2'
+    `$1<w:rPr>${fonteCalibri}</w:rPr>$2`
   );
 
   // Gera uma linha por corretor (sem limite fixo)
