@@ -806,7 +806,8 @@ serve(async (req) => {
         .eq("sigla", dados.sigla)
         .eq("unidade", dados.unidade);
       if (dados.bloco) query = query.eq("bloco", dados.bloco);
-      const { data: u } = await query.single();
+      const { data: u, error: uErr } = await query.single();
+      if (uErr) console.error("unidades lookup error:", JSON.stringify(uErr));
       if (u) {
         fracaoIdeal = u.fracao_ideal || "";
         vagas       = String(u.vagas ?? "");
