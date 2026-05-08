@@ -331,7 +331,10 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   const rPr      = rPrMatch ? rPrMatch[0] : "";
 
   // Remove parágrafos "fantasma" logo após o placeholder: parágrafos que têm o
-  // mesmo numId e contêm apenas "." (resíduo de template com lista numerada)
+  // mesmo numId e contêm apenas "." (resíduo de template com lista numerada).
+  // Parágrafos vazios entre o placeholder e o fantasma são pulados durante a
+  // busca — e também removidos quando o fantasma é encontrado, pois pEnd salta
+  // para além do fantasma, englobando os vazios intermediários.
   if (origNumId) {
     let pos2 = pEnd;
     while (true) {
@@ -341,13 +344,16 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
       if (charAfter !== ">" && charAfter !== " ") { pos2 = nextP + 1; continue; }
       const nextPEnd = xml.indexOf("</w:p>", nextP) + "</w:p>".length;
       const nextPara = xml.substring(nextP, nextPEnd);
-      // Remove se tiver o mesmo numId e texto apenas "."
       const hasNumId = nextPara.includes(`<w:numId w:val="${origNumId}"`);
       const textOnly = [...nextPara.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)]
         .map(m => m[1]).join("").trim();
       if (hasNumId && textOnly === ".") {
-        pEnd = nextPEnd;
+        pEnd = nextPEnd; // inclui vazios anteriores e o próprio fantasma
         pos2 = pEnd;
+        continue;
+      }
+      if (textOnly === "") {
+        pos2 = nextPEnd; // pula vazio sem confirmar remoção ainda
         continue;
       }
       break;
