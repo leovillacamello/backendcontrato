@@ -464,13 +464,25 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
   let resultado = (xml.substring(0, trStart) + linhas + xml.substring(trEnd))
     .replaceAll("«TOTAL_COMISSAO»", formatar(total));
 
-  // Remove run com ",00" hardcoded que alguns templates têm logo após «TOTAL_COMISSAO»
+  // Remove run com ",00" hardcoded que alguns templates têm logo após «TOTAL_COMISSAO».
+  // Itera TODAS as ocorrências porque CORRETOR_VALOR e TOTAL_COMISSAO podem ter o mesmo
+  // valor formatado — a linha de corretor não tem ,00 após o valor, só a linha TOTAL tem.
   const totalStr = formatar(total);
-  const totalPos = resultado.indexOf(totalStr + "</w:t>");
-  if (totalPos !== -1) {
-    const ahead = resultado.substring(totalPos, totalPos + 400);
-    const fixed = ahead.replace(/<w:r\b[^>]*>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t[^>]*>,00<\/w:t><\/w:r>/, "");
-    resultado = resultado.substring(0, totalPos) + fixed + resultado.substring(totalPos + 400);
+  const searchStr = totalStr + "</w:t>";
+  let pos = 0;
+  while (true) {
+    const found = resultado.indexOf(searchStr, pos);
+    if (found === -1) break;
+    const ahead = resultado.substring(found, found + 600);
+    const fixed = ahead.replace(
+      /<w:r\b[^>]*>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?<w:t[^>]*>\s*,00\s*<\/w:t><\/w:r>/,
+      ""
+    );
+    if (fixed !== ahead) {
+      resultado = resultado.substring(0, found) + fixed + resultado.substring(found + 600);
+      break;
+    }
+    pos = found + 1;
   }
 
   return resultado;
@@ -733,13 +745,16 @@ serve(async (req) => {
     const ass1       = dados.compradores[0]?.nome || "";
     const ass2       = dados.compradores[1]?.nome || "";
 
-    // ─── Sinal líquido: quando destacada no ato, desconta a comissão do sinal exibido
+    // ─── Valores líquidos (destacada = preço e sinal já descontados da comissão)
     const totalComissao = dados.corretores?.length
       ? dados.corretores.reduce((s, c) => s + (c.valor || 0), 0)
       : comissao.total_comissao;
     const sinalExibido = (comissao.tipo === "destacada" && comissao.parcela_desconto === "ato")
       ? Math.max(0, sinal - totalComissao)
       : sinal;
+    const precoExibido = comissao.tipo === "destacada"
+      ? Math.max(0, preco - totalComissao)
+      : preco;
 
     // ─── Substituições
     xml1 = substituir(xml1, {
@@ -747,7 +762,7 @@ serve(async (req) => {
       "«FRACAO_IDEAL»":     fracaoIdeal,
       "«IMOBILIARIA»":      imobStr,
       "«PORCENTAGEMSINAL»": formatarPercentual(percentual),
-      "«PRECO»":            formatar(preco),
+      "«PRECO»":            `${formatar(precoExibido)} (${extenso(precoExibido)})`,
       "«SINAL»":            formatar(sinalExibido),
       "«UNIDADE»":          dados.unidade || "",
       "«VAGAS»":            vagas,
