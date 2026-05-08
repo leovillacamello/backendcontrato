@@ -41,6 +41,9 @@ interface Corretor {
 interface Imobiliaria {
   empresa?: string;
   nome?: string;
+  cnpj?: string;
+  percentual?: number;
+  valor?: number;
 }
 
 interface ContratoRequest {
@@ -415,6 +418,18 @@ function qualificar(c: Comprador): string {
   );
 }
 
+function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
+  if (!imobiliarias?.length) return "";
+  const partes = imobiliarias.map(im => {
+    const nome = im.empresa || im.nome || "";
+    const val  = im.valor ?? (preco * (im.percentual ?? 0) / 100);
+    const cnpj = im.cnpj ? `, inscrita no CNPJ/ME sob o nº ${im.cnpj}` : "";
+    return `R$${formatar(val)} (${extenso(val)}) para ${nome}${cnpj}`;
+  });
+  const ultimo = partes.pop()!;
+  return "sendo " + (partes.length ? partes.join(", ") + " e " : "") + ultimo;
+}
+
 function montarCompradora(dados: ContratoRequest): string {
   const compradores = dados.compradores;
   const relacao     = dados.relacao || "solteiro / independentes";
@@ -770,11 +785,9 @@ serve(async (req) => {
     let xml2 = strFromU8(zip2["word/document.xml"]);
 
     // ─── Imobiliária (só faturado)
-    let imobStr = "";
-    if (comissao.tipo === "faturada" && dados.imobiliarias?.length) {
-      const im = dados.imobiliarias[0];
-      imobStr  = im.empresa || im.nome || "";
-    }
+    const imobStr = (comissao.tipo === "faturada" && dados.imobiliarias?.length)
+      ? montarImobiliaria(dados.imobiliarias, preco)
+      : "";
 
     // ─── Comunicação — tratada por substituirComunicacao() após substituir()
 
@@ -799,13 +812,14 @@ serve(async (req) => {
     xml1 = substituir(xml1, {
       "«COMPRADORA»":       montarCompradora(dados),
       "«FRACAO_IDEAL»":     fracaoIdeal,
-      "«IMOBILIARIA»":      imobStr,
+      "qual seja, «IMOBILIARIA»": imobStr,  // chave longa: "qual seja, " e placeholder no mesmo run
+      "«IMOBILIARIA»":            imobStr,  // fallback: placeholder em run separado
       "«PORCENTAGEMSINAL»": formatarPercentual(percentual),
       "«PRECO»":            `${formatar(precoExibido)} (${extenso(precoExibido)})`,
       "«SINAL»":            formatar(sinalExibido),
       "«UNIDADE»":          dados.unidade || "",
       "«VAGAS»":            vagas,
-      "«VLR_COMISSAO»":     formatar(totalComissao),
+      "«VLR_COMISSAO»":     `R$${formatar(totalComissao)} (${extenso(totalComissao)})`,
     });
     const descontoComp = (comissao.tipo === "destacada" &&
       (comissao.parcela_desconto === "complemento_30" || comissao.parcela_desconto === "complemento_60"))
