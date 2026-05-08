@@ -826,10 +826,21 @@ serve(async (req) => {
     let xml1 = strFromU8(zip1["word/document.xml"]);
     let xml2 = strFromU8(zip2["word/document.xml"]);
 
-    // ─── Imobiliária (só faturado)
-    const imobStr = (comissao.tipo === "faturada" && dados.imobiliarias?.length)
-      ? montarImobiliaria(dados.imobiliarias, preco)
-      : "";
+    // ─── Imobiliária
+    // Faturado (BCO/H23/AAZ): formato completo "sendo R$X (extenso) para NOME, CNPJ"
+    // Destacada com «IMOBILIARIA» no template (SMK cabeca): só o nome da empresa
+    let imobStr = "";
+    if (dados.imobiliarias?.length) {
+      if (comissao.tipo === "faturada") {
+        imobStr = montarImobiliaria(dados.imobiliarias, preco);
+      } else {
+        // Destacada: preenche só o nome (templates como SMK cabeca têm «IMOBILIARIA»
+        // na cláusula "qual seja, a empresa X" — não esperam valor monetário)
+        imobStr = dados.imobiliarias
+          .map(im => im.empresa || im.nome || "")
+          .filter(Boolean).join(" e ");
+      }
+    }
 
     // ─── Comunicação — tratada por substituirComunicacao() após substituir()
 
