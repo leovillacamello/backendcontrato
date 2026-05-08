@@ -455,6 +455,14 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
   rowNorm = rowNorm.replace(/(<w:pPr>)([\s\S]*?)(<\/w:pPr>)/g, (m, open, content, close) =>
     content.includes("<w:jc ") ? m : open + content + '<w:jc w:val="center"/>' + close
   );
+  // Força fonte 12pt (24 meios-pontos) em todos os runs da linha
+  rowNorm = rowNorm.replace(/(<w:rPr>)([\s\S]*?)(<\/w:rPr>)/g, (m, open, content, close) =>
+    open + content + '<w:sz w:val="24"/><w:szCs w:val="24"/>' + close
+  );
+  // Runs sem rPr: insere rPr com fonte 12pt antes de <w:t>
+  rowNorm = rowNorm.replace(/(<w:r\b[^>]*>)(?![\s\S]{0,50}<w:rPr)(<w:t)/g,
+    '$1<w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr>$2'
+  );
 
   // Gera uma linha por corretor (sem limite fixo)
   const linhas = corretores.map(c =>
@@ -684,9 +692,8 @@ serve(async (req) => {
       preco    = dados.valor_venda_manual || r.valor_venda;
     }
 
-    const sinal      = parcelas.find(p => p.tipo === "ato")?.valor || 0;
-    const percentual = preco > 0 ? (sinal / preco * 100) : 0;
-    const comps      = parcelas.filter(p => p.tipo === "complemento");
+    const sinal = parcelas.find(p => p.tipo === "ato")?.valor || 0;
+    const comps = parcelas.filter(p => p.tipo === "complemento");
     const p30        = comps[0]?.valor || 0;
     const p60        = comps[1]?.valor || 0;
 
@@ -760,6 +767,7 @@ serve(async (req) => {
     const precoExibido = comissao.tipo === "destacada"
       ? Math.max(0, preco - totalComissao)
       : preco;
+    const percentual = preco > 0 ? (sinalExibido / preco * 100) : 0;
 
     // ─── Substituições
     xml1 = substituir(xml1, {
