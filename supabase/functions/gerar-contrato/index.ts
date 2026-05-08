@@ -857,27 +857,24 @@ serve(async (req) => {
     // ─── Corrige rodapés para paginação por seção
     const zipBase = { ...zip1, "word/document.xml": strToU8(xmlFinal) };
 
-    // Encontra todos os arquivos de footer no ZIP (funciona independente do nome)
     const footerKeys = Object.keys(zipBase).filter(k =>
       k.startsWith("word/footer") && k.endsWith(".xml")
     );
 
-    // Footer do quadro = o que contém "do Quadro-Resumo"
+    // Sempre: NUMPAGES → SECTIONPAGES em todos os footers (conta páginas por seção)
+    for (const key of footerKeys) {
+      let f = strFromU8(zipBase[key]);
+      if (f.includes("NUMPAGES")) {
+        f = f.replace(/\bNUMPAGES\b/g, "SECTIONPAGES");
+        zipBase[key] = strToU8(f);
+      }
+    }
+
+    // Só para templates com "do Quadro-Resumo": cria footer do corpo sem esse texto
     const quadroKey = footerKeys.find(k =>
       strFromU8(zipBase[k]).includes("do Quadro-Resumo")
     );
-
     if (quadroKey) {
-      // NUMPAGES → SECTIONPAGES em TODOS os footers existentes
-      for (const key of footerKeys) {
-        let f = strFromU8(zipBase[key]);
-        if (f.includes("NUMPAGES")) {
-          f = f.replace(/\bNUMPAGES\b/g, "SECTIONPAGES");
-          zipBase[key] = strToU8(f);
-        }
-      }
-
-      // Se não existe footer do corpo separado, cria derivando do footer do quadro
       const numQuadro = parseInt(quadroKey.replace("word/footer", "").replace(".xml", "")) || 1;
       const corpoKey  = `word/footer${numQuadro + 1}.xml`;
       if (!zipBase[corpoKey]) {
