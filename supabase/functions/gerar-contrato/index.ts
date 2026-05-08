@@ -857,18 +857,36 @@ serve(async (req) => {
     // ─── Corrige rodapés para paginação por seção
     const zipBase = { ...zip1, "word/document.xml": strToU8(xmlFinal) };
 
-    if (zipBase["word/footer1.xml"]) {
-      // Quadro (footer1): NUMPAGES → SECTIONPAGES para contar só páginas do quadro
-      let footer1 = strFromU8(zipBase["word/footer1.xml"]);
-      footer1 = footer1.replace(/\bNUMPAGES\b/g, "SECTIONPAGES");
-      zipBase["word/footer1.xml"] = strToU8(footer1);
+    // Encontra todos os arquivos de footer no ZIP (funciona independente do nome)
+    const footerKeys = Object.keys(zipBase).filter(k =>
+      k.startsWith("word/footer") && k.endsWith(".xml")
+    );
 
-      // Corpo (footer2): tem texto estático "18 de 18" sem campos vivos.
-      // Geramos um footer2 baseado no footer1, com SECTIONPAGES e sem "do Quadro-Resumo"
-      let footer2 = footer1
-        .replace(/<w:r[^>]*><w:t[^>]*> do Quadro-Resumo<\/w:t><\/w:r>/g, "")
-        .replace(/ do Quadro-Resumo/g, "");
-      zipBase["word/footer2.xml"] = strToU8(footer2);
+    // Footer do quadro = o que contém "do Quadro-Resumo"
+    const quadroKey = footerKeys.find(k =>
+      strFromU8(zipBase[k]).includes("do Quadro-Resumo")
+    );
+
+    if (quadroKey) {
+      // NUMPAGES → SECTIONPAGES em TODOS os footers existentes
+      for (const key of footerKeys) {
+        let f = strFromU8(zipBase[key]);
+        if (f.includes("NUMPAGES")) {
+          f = f.replace(/\bNUMPAGES\b/g, "SECTIONPAGES");
+          zipBase[key] = strToU8(f);
+        }
+      }
+
+      // Se não existe footer do corpo separado, cria derivando do footer do quadro
+      const numQuadro = parseInt(quadroKey.replace("word/footer", "").replace(".xml", "")) || 1;
+      const corpoKey  = `word/footer${numQuadro + 1}.xml`;
+      if (!zipBase[corpoKey]) {
+        let fCorpo = strFromU8(zipBase[quadroKey]);
+        fCorpo = fCorpo
+          .replace(/<w:r[^>]*><w:t[^>]*> do Quadro-Resumo<\/w:t><\/w:r>/g, "")
+          .replace(/ do Quadro-Resumo/g, "");
+        zipBase[corpoKey] = strToU8(fCorpo);
+      }
     }
 
     const newZip    = zipBase;
