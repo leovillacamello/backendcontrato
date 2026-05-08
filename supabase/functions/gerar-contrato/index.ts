@@ -862,15 +862,6 @@ serve(async (req) => {
 
     // ─── Substituições
     const corretor0 = dados.corretores?.[0];
-    // DMS: até 4 corretores numerados
-    const dmsCorretores: Record<string, string> = {};
-    for (let n = 1; n <= 4; n++) {
-      const c = dados.corretores?.[n - 1];
-      dmsCorretores[`«EMPRESA_CORRETOR${n}»`]  = c?.nome      || "";
-      dmsCorretores[`«INSCRICAO_CRECI${n}»`]   = c?.creci     || "";
-      dmsCorretores[`«CPF_CNPJ${n}»`]          = c?.cpf_cnpj  || "";
-      dmsCorretores[`«VALORCOMISSAO${n}»`]      = c?.valor ? `R$${formatar(c.valor)}` : "";
-    }
     xml1 = substituir(xml1, {
       "«COMPRADORA»":        montarCompradora(dados),
       "«FRACAO_IDEAL»":      fracaoIdeal,
@@ -888,8 +879,6 @@ serve(async (req) => {
       "«CORRETOR_VALOR»":    corretor0?.valor ? `R$${formatar(corretor0.valor)}` : "",
       // AAZ/SMK/DMS: total sem centavos (template já tem R$ e ,00 hardcoded)
       "«TOTAL_COMISSAO»":    formatar(totalComissao).replace(/,\d{2}$/, ""),
-      // DMS: 4 linhas de corretores numeradas
-      ...dmsCorretores,
     });
     // Template faturado tem "qual seja, " hardcoded antes de «IMOBILIARIA» (runs separados).
     // Remove "qual seja, " que sobrou no nó de texto após a substituição do placeholder.
