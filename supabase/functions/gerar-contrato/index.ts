@@ -231,12 +231,36 @@ function romano(n: number): string {
   return n < r.length ? r[n] : String(n);
 }
 
-function linhasPagamento(parcelas: Parcela[]): string[] {
-  // Retorna uma linha de texto por parcela (sem prefixo romano — o template já é lista numerada)
+function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; valor: number }): string[] {
   const textos: string[] = [];
+  const temDescontoComp = descontoComp?.parcela === "complemento_30" || descontoComp?.parcela === "complemento_60";
+  const comps = parcelas.filter(p => p.tipo === "complemento");
+  let compEmitido = false;
 
   for (const p of parcelas) {
     if (p.tipo === "ato") continue;
+
+    // Complemento com comissão destacada: agrupa os dois em um único item com valores diferentes
+    if (p.tipo === "complemento" && temDescontoComp && comps.length >= 2) {
+      if (!compEmitido) {
+        compEmitido = true;
+        const comissao = descontoComp!.valor;
+        const [val1, val2] = descontoComp!.parcela === "complemento_30"
+          ? [Math.max(0, comps[0].valor - comissao), comps[1].valor]
+          : [comps[0].valor, Math.max(0, comps[1].valor - comissao)];
+        const total = val1 + val2;
+        const data1 = comps[0].data || "";
+        const reaj  = comps[0].reajustavel !== false ? "reajustável" : "fixo";
+        textos.push(
+          `R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}s, ` +
+          `mensais, sucessivas, a primeira no valor de R$${formatar(val1)} (${extenso(val1)}) ` +
+          `vencendo-se a primeira no dia ${data1} e a outra no valor de R$${formatar(val2)} ` +
+          `(${extenso(val2)}) no mesmo dia do mês subsequente ("Parcelas de Complemento de Sinal");`
+        );
+      }
+      continue;
+    }
+
     const qtd       = p.qtd || 1;
     const total     = p.valor * qtd;
     const valorUnit = formatar(p.valor);
@@ -271,8 +295,8 @@ function linhasPagamento(parcelas: Parcela[]): string[] {
 }
 
 // substituirPagamento: substitui o parágrafo «PAGAMENTO» por N parágrafos (um por parcela)
-function substituirPagamento(xml: string, parcelas: Parcela[]): string {
-  const linhas = linhasPagamento(parcelas);
+function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { parcela: string; valor: number }): string {
+  const linhas = linhasPagamento(parcelas, descontoComp);
   const idx    = xml.indexOf("«PAGAMENTO»");
   if (idx === -1) return xml;
 
@@ -783,7 +807,11 @@ serve(async (req) => {
       "«VAGAS»":            vagas,
       "«VLR_COMISSAO»":     formatar(totalComissao),
     });
-    xml1 = substituirPagamento(xml1, parcelas);
+    const descontoComp = (comissao.tipo === "destacada" &&
+      (comissao.parcela_desconto === "complemento_30" || comissao.parcela_desconto === "complemento_60"))
+      ? { parcela: comissao.parcela_desconto, valor: totalComissao }
+      : undefined;
+    xml1 = substituirPagamento(xml1, parcelas, descontoComp);
     xml1 = substituirComunicacao(xml1, dados);
 
     xml2 = substituir(xml2, {
