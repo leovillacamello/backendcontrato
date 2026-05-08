@@ -812,8 +812,7 @@ serve(async (req) => {
     xml1 = substituir(xml1, {
       "«COMPRADORA»":       montarCompradora(dados),
       "«FRACAO_IDEAL»":     fracaoIdeal,
-      "qual seja, «IMOBILIARIA»": imobStr,  // chave longa: "qual seja, " e placeholder no mesmo run
-      "«IMOBILIARIA»":            imobStr,  // fallback: placeholder em run separado
+      "«IMOBILIARIA»":      imobStr,
       "«PORCENTAGEMSINAL»": formatarPercentual(percentual),
       "«PRECO»":            `${formatar(precoExibido)} (${extenso(precoExibido)})`,
       "«SINAL»":            formatar(sinalExibido),
@@ -821,6 +820,17 @@ serve(async (req) => {
       "«VAGAS»":            vagas,
       "«VLR_COMISSAO»":     `R$${formatar(totalComissao)} (${extenso(totalComissao)})`,
     });
+    // Template faturado tem "qual seja, " hardcoded antes de «IMOBILIARIA» (runs separados).
+    // Remove "qual seja, " que sobrou no nó de texto após a substituição do placeholder.
+    if (comissao.tipo === "faturada" && dados.imobiliarias?.length) {
+      xml1 = xml1.replace(
+        /(<w:t[^>]*>)([^<]*)qual seja,\s*(<\/w:t>)/g,
+        (_, open, before, close) => {
+          const trimmed = before.trimEnd();
+          return trimmed ? `${open}${trimmed}${close}` : "";
+        }
+      );
+    }
     const descontoComp = (comissao.tipo === "destacada" &&
       (comissao.parcela_desconto === "complemento_30" || comissao.parcela_desconto === "complemento_60"))
       ? { parcela: comissao.parcela_desconto, valor: totalComissao }
