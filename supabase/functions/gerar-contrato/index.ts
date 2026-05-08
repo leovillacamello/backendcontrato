@@ -56,6 +56,7 @@ interface ContratoRequest {
   email?: string;
   sigla?: string;
   unidade?: string;
+  bloco?: string;
   fracao_ideal?: string;
   vagas?: string;
   parcelas_diretas?: Parcela[];
@@ -794,20 +795,21 @@ serve(async (req) => {
     // ─── Templates
     const tpls = getTemplates(dados.sigla || "", comissao.tipo);
 
-    // ─── Fração ideal e vagas (busca no banco se não vier no payload)
-    let fracaoIdeal = dados.fracao_ideal || "";
-    let vagas       = dados.vagas || "";
+    // ─── Fração ideal e vagas — sempre do banco, nunca do payload
+    let fracaoIdeal = "";
+    let vagas       = "";
 
-    if (dados.sigla && dados.unidade && (!fracaoIdeal || !vagas)) {
-      const { data: u } = await supabase
+    if (dados.sigla && dados.unidade) {
+      let query = supabase
         .from("unidades")
         .select("fracao_ideal, vagas")
         .eq("sigla", dados.sigla)
-        .eq("unidade", dados.unidade)
-        .single();
+        .eq("unidade", dados.unidade);
+      if (dados.bloco) query = query.eq("bloco", dados.bloco);
+      const { data: u } = await query.single();
       if (u) {
-        fracaoIdeal = u.fracao_ideal || fracaoIdeal;
-        vagas       = String(u.vagas ?? vagas);
+        fracaoIdeal = u.fracao_ideal || "";
+        vagas       = String(u.vagas ?? "");
       }
     }
 
