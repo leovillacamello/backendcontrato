@@ -445,11 +445,16 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
 
   const rowModelo = xml.substring(trStart, trEnd);
 
-  // Normaliza rPr da linha modelo: remove sz/szCs explícitos (corrige fonte pequena do template)
-  // e garante centralização de texto nas células
-  const rowNorm = rowModelo
-    .replace(/<w:sz w:val="\d+"\/>/g, "")
-    .replace(/<w:szCs w:val="\d+"\/>/g, "");
+  // Normaliza rPr da linha modelo: remove sz/szCs explícitos e força centralização
+  let rowNorm = rowModelo
+    .replace(/<w:sz\b[^>]*\/>/g, "")
+    .replace(/<w:szCs\b[^>]*\/>/g, "");
+
+  // Substitui qualquer jc existente por center; depois adiciona center em pPr sem jc
+  rowNorm = rowNorm.replace(/<w:jc\b[^>]*\/>/g, '<w:jc w:val="center"/>');
+  rowNorm = rowNorm.replace(/(<w:pPr>)([\s\S]*?)(<\/w:pPr>)/g, (m, open, content, close) =>
+    content.includes("<w:jc ") ? m : open + content + '<w:jc w:val="center"/>' + close
+  );
 
   // Gera uma linha por corretor (sem limite fixo)
   const linhas = corretores.map(c =>
