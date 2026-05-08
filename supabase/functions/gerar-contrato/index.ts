@@ -313,7 +313,7 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
     if (charAfter === ">" || charAfter === " ") { pStart = candidate; break; }
     searchPos2 = candidate - 1;
   }
-  const pEnd = xml.indexOf("</w:p>", idx) + "</w:p>".length;
+  let pEnd = xml.indexOf("</w:p>", idx) + "</w:p>".length;
   if (pStart === -1 || pEnd < idx) return xml;
 
   const paraOrig = xml.substring(pStart, pEnd);
@@ -322,9 +322,37 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   const pPrMatch = paraOrig.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/);
   const pPr      = pPrMatch ? pPrMatch[0] : "";
 
+  // Extrai o numId do parágrafo original (se houver)
+  const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
+  const origNumId  = numIdMatch ? numIdMatch[1] : null;
+
   // Extrai <w:rPr> do run original para manter fonte
   const rPrMatch = paraOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
   const rPr      = rPrMatch ? rPrMatch[0] : "";
+
+  // Remove parágrafos "fantasma" logo após o placeholder: parágrafos que têm o
+  // mesmo numId e contêm apenas "." (resíduo de template com lista numerada)
+  if (origNumId) {
+    let pos2 = pEnd;
+    while (true) {
+      const nextP = xml.indexOf("<w:p", pos2);
+      if (nextP === -1) break;
+      const charAfter = xml[nextP + 4];
+      if (charAfter !== ">" && charAfter !== " ") { pos2 = nextP + 1; continue; }
+      const nextPEnd = xml.indexOf("</w:p>", nextP) + "</w:p>".length;
+      const nextPara = xml.substring(nextP, nextPEnd);
+      // Remove se tiver o mesmo numId e texto apenas "."
+      const hasNumId = nextPara.includes(`<w:numId w:val="${origNumId}"`);
+      const textOnly = [...nextPara.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)]
+        .map(m => m[1]).join("").trim();
+      if (hasNumId && textOnly === ".") {
+        pEnd = nextPEnd;
+        pos2 = pEnd;
+        continue;
+      }
+      break;
+    }
+  }
 
   if (linhas.length === 0) {
     // Sem parcelas: remove o parágrafo inteiro
@@ -374,7 +402,10 @@ function substituirComunicacao(xml: string, dados: ContratoRequest): string {
 
   const runOrig  = xml.substring(rStart, rEnd);
   const rPrMatch = runOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
-  const rPr      = rPrMatch ? rPrMatch[0] : "";
+  // Remove bold from rPr so communication text is never rendered bold
+  const rPr      = rPrMatch
+    ? rPrMatch[0].replace(/<w:b\/>/g, "").replace(/<w:bCs\/>/g, "")
+    : "";
 
   const linhas: string[] = [];
   if (dados.compradores[0]?.nome) linhas.push(`At.: ${escapeXml(dados.compradores[0].nome)}`);
