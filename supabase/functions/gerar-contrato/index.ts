@@ -521,10 +521,16 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
   const rowModelo = xml.substring(trStart, trEnd);
 
   // Normaliza rPr da linha modelo: remove sz/szCs e rFonts explícitos e força centralização
+  // Remove também w14:paraId e w14:textId para evitar IDs duplicados ao copiar a linha
   let rowNorm = rowModelo
     .replace(/<w:sz\b[^>]*\/>/g, "")
     .replace(/<w:szCs\b[^>]*\/>/g, "")
-    .replace(/<w:rFonts\b[^>]*\/>/g, "");
+    .replace(/<w:rFonts\b[^>]*\/>/g, "")
+    .replace(/\s*w14:paraId="[^"]*"/g, "")
+    .replace(/\s*w14:textId="[^"]*"/g, "")
+    .replace(/\s*w:rsidR="[^"]*"/g, "")
+    .replace(/\s*w:rsidRPr="[^"]*"/g, "")
+    .replace(/\s*w:rsidRDefault="[^"]*"/g, "");
 
   // Substitui qualquer jc existente por center; depois adiciona center em pPr sem jc
   rowNorm = rowNorm.replace(/<w:jc\b[^>]*\/>/g, '<w:jc w:val="center"/>');
