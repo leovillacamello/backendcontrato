@@ -851,16 +851,24 @@ serve(async (req) => {
     const percentual = preco > 0 ? (sinalExibido / preco * 100) : 0;
 
     // ─── Substituições
+    const corretor0 = dados.corretores?.[0];
     xml1 = substituir(xml1, {
-      "«COMPRADORA»":       montarCompradora(dados),
-      "«FRACAO_IDEAL»":     fracaoIdeal,
-      "«IMOBILIARIA»":      imobStr,
-      "«PORCENTAGEMSINAL»": formatarPercentual(percentual),
-      "«PRECO»":            `${formatar(precoExibido)} (${extenso(precoExibido)})`,
-      "«SINAL»":            formatar(sinalExibido),
-      "«UNIDADE»":          dados.unidade || "",
-      "«VAGAS»":            vagas,
-      "«VLR_COMISSAO»":     `R$${formatar(totalComissao)} (${extenso(totalComissao)})`,
+      "«COMPRADORA»":        montarCompradora(dados),
+      "«FRACAO_IDEAL»":      fracaoIdeal,
+      "«IMOBILIARIA»":       imobStr,
+      "«PORCENTAGEMSINAL»":  formatarPercentual(percentual),
+      "«PRECO»":             `${formatar(precoExibido)} (${extenso(precoExibido)})`,
+      "«SINAL»":             formatar(sinalExibido),
+      "«UNIDADE»":           dados.unidade || "",
+      "«VAGAS»":             vagas,
+      "«VLR_COMISSAO»":      `R$${formatar(totalComissao)} (${extenso(totalComissao)})`,
+      // AAZ: corretor inline (linha única, não tabela dinâmica)
+      "«CORRETOR_EMPRESA»":  corretor0?.nome || "",
+      "«CORRETOR_CRECI»":    corretor0?.creci || "",
+      "«CORRETOR_CPFCNPJ»":  corretor0?.cpf_cnpj || "",
+      "«CORRETOR_VALOR»":    corretor0?.valor ? `R$${formatar(corretor0.valor)}` : "",
+      // AAZ: total da comissão sem centavos (template já tem R$ e ,00 hardcoded)
+      "«TOTAL_COMISSAO»":    formatar(totalComissao).replace(/,\d{2}$/, ""),
     });
     // Template faturado tem "qual seja, " hardcoded antes de «IMOBILIARIA» (runs separados).
     // Remove "qual seja, " que sobrou no nó de texto após a substituição do placeholder.
