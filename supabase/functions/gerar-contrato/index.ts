@@ -875,19 +875,70 @@ serve(async (req) => {
       }
     }
 
-    // Só para templates com "do Quadro-Resumo": cria footer do corpo sem esse texto
+    // Só para templates com "do Quadro-Resumo": garante footer do corpo sem esse texto
+    // e atualiza rels + sectPr do corpo para apontarem para o footer correto
     const quadroKey = footerKeys.find(k =>
       strFromU8(zipBase[k]).includes("do Quadro-Resumo")
     );
     if (quadroKey) {
-      const numQuadro = parseInt(quadroKey.replace("word/footer", "").replace(".xml", "")) || 1;
-      const corpoKey  = `word/footer${numQuadro + 1}.xml`;
+      // Descobre o rId do footer do quadro nas relações
+      const relsKey  = "word/_rels/document.xml.rels";
+      let   relsXml  = zipBase[relsKey] ? strFromU8(zipBase[relsKey]) : "";
+      const quadroFileName = quadroKey.replace("word/", ""); // ex: "footer1.xml"
+      const quadroRIdMatch = relsXml.match(
+        new RegExp(`Id="(rId\\d+)"[^>]*Target="${quadroFileName}"`)
+      );
+
+      // Cria footer do corpo se ainda não existir
+      const numQuadro  = parseInt(quadroKey.replace("word/footer", "").replace(".xml", "")) || 1;
+      const corpoLocal = `footer${numQuadro + 1}.xml`;
+      const corpoKey   = `word/${corpoLocal}`;
       if (!zipBase[corpoKey]) {
         let fCorpo = strFromU8(zipBase[quadroKey]);
         fCorpo = fCorpo
           .replace(/<w:r[^>]*><w:t[^>]*> do Quadro-Resumo<\/w:t><\/w:r>/g, "")
           .replace(/ do Quadro-Resumo/g, "");
         zipBase[corpoKey] = strToU8(fCorpo);
+
+        // Adiciona [Content_Types] para o novo arquivo
+        const ctKey = "[Content_Types].xml";
+        if (zipBase[ctKey]) {
+          let ct = strFromU8(zipBase[ctKey]);
+          const footerCT = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml";
+          if (!ct.includes(corpoLocal)) {
+            ct = ct.replace("</Types>",
+              `<Override PartName="/word/${corpoLocal}" ContentType="${footerCT}"/></Types>`);
+            zipBase[ctKey] = strToU8(ct);
+          }
+        }
+
+        // Adiciona relação para o novo footer e descobre o novo rId
+        const rIdNums  = [...relsXml.matchAll(/Id="rId(\d+)"/g)].map(m => parseInt(m[1]));
+        const newRId   = `rId${Math.max(0, ...rIdNums) + 1}`;
+        const footerType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer";
+        relsXml = relsXml.replace("</Relationships>",
+          `<Relationship Id="${newRId}" Type="${footerType}" Target="${corpoLocal}"/></Relationships>`);
+        zipBase[relsKey] = strToU8(relsXml);
+
+        // Atualiza o sectPr do corpo (último no documento) para referenciar o novo footer
+        // O corpo usa o quadroRId → troca pelo newRId
+        if (quadroRIdMatch) {
+          const quadroRId = quadroRIdMatch[1];
+          let docXml = strFromU8(zipBase["word/document.xml"]);
+          const lastSPIdx = docXml.lastIndexOf("<w:sectPr");
+          const lastSPEnd = docXml.indexOf("</w:sectPr>", lastSPIdx);
+          if (lastSPIdx !== -1 && lastSPEnd !== -1) {
+            const spLen    = lastSPEnd + "</w:sectPr>".length;
+            let   corpoSP  = docXml.substring(lastSPIdx, spLen);
+            corpoSP = corpoSP.replace(
+              new RegExp(`(<w:footerReference[^>]*r:id=")${quadroRId}(")`,"g"),
+              `$1${newRId}$2`
+            );
+            zipBase["word/document.xml"] = strToU8(
+              docXml.substring(0, lastSPIdx) + corpoSP + docXml.substring(spLen)
+            );
+          }
+        }
       }
     }
 
