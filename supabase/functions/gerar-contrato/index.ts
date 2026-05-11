@@ -1015,6 +1015,7 @@ serve(async (req) => {
     try {
       await supabase.from("historico_contratos").insert({
         sigla:         dados.sigla || "",
+        bloco:         dados.bloco || "",
         unidade:       dados.unidade || "",
         comprador:     ass1,
         tipo_comissao: comissao.tipo,
