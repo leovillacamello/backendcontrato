@@ -661,7 +661,7 @@ function validarEntrada(dados: ContratoRequest): string | null {
   if (!dados.sigla || typeof dados.sigla !== "string")
     return "Campo obrigatório: sigla";
   if (!SIGLAS_VALIDAS.has(dados.sigla))
-    return `Sigla inválida: ${dados.sigla}. Permitidas: ${[...SIGLAS_VALIDAS].join(", ")}`;
+    return `Sigla inválida`;
 
   // unidade
   if (!dados.unidade || typeof dados.unidade !== "string")
@@ -721,7 +721,11 @@ const ORIGENS_PERMITIDAS = new Set([
 
 serve(async (req) => {
   const origin = req.headers.get("origin") || "";
-  const allowedOrigin = ORIGENS_PERMITIDAS.has(origin) ? origin : "*"; // fallback * para testes via PowerShell
+  const allowedOrigin = ORIGENS_PERMITIDAS.has(origin) ? origin : (origin ? null : "*");
+
+  if (allowedOrigin === null) {
+    return new Response("Forbidden", { status: 403 });
+  }
 
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowedOrigin,
@@ -738,18 +742,17 @@ serve(async (req) => {
   }
 
   // Limite de tamanho do payload: 100 KB
-  const contentLength = Number(req.headers.get("content-length") || 0);
-  if (contentLength > 100_000) {
-    return new Response(
-      JSON.stringify({ error: "Payload muito grande (máx 100 KB)" }),
-      { status: 413, headers: { "Content-Type": "application/json", ...corsHeaders } }
-    );
-  }
-
   try {
     let dados: ContratoRequest;
     try {
-      dados = await req.json();
+      const bodyText = await req.text();
+      if (bodyText.length > 100_000) {
+        return new Response(
+          JSON.stringify({ error: "Payload muito grande (máx 100 KB)" }),
+          { status: 413, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      dados = JSON.parse(bodyText);
     } catch {
       return new Response(
         JSON.stringify({ error: "JSON inválido" }),
@@ -787,7 +790,10 @@ serve(async (req) => {
     const p60        = comps[1]?.valor || 0;
 
     const comissao = definirTipoComissao(preco, sinal, p30, p60);
+    const PARCELAS_VALIDAS = new Set(["ato", "complemento_30", "complemento_60"]);
     if (dados.parcela_desconto_manual) {
+      if (!PARCELAS_VALIDAS.has(dados.parcela_desconto_manual))
+        return new Response(JSON.stringify({ error: "parcela_desconto_manual inválida" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } });
       comissao.tipo = "destacada";
       comissao.parcela_desconto = dados.parcela_desconto_manual;
     }
@@ -821,8 +827,9 @@ serve(async (req) => {
     ]);
 
     if (dl1.error || dl2.error || !dl1.data || !dl2.data) {
+      console.error("Template não encontrado:", tpls, dl1.error, dl2.error);
       return new Response(
-        JSON.stringify({ error: "Template não encontrado", tpls }),
+        JSON.stringify({ error: "Erro interno ao carregar template" }),
         { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
@@ -1017,11 +1024,13 @@ serve(async (req) => {
 
     // ─── Retornar arquivo
     const filename = `${dados.sigla || ""} ${dados.unidade || ""} - Contrato Promessa de Compra e Venda.docx`.trim();
+    const safeFilename = filename.replace(/[^\w\s\-\.]/g, "_");
+    const encodedFilename = encodeURIComponent(safeFilename);
 
     return new Response(docxBytes, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodedFilename}`,
         ...corsHeaders,
       },
     });
@@ -1029,7 +1038,7 @@ serve(async (req) => {
   } catch (err) {
     console.error(err);
     return new Response(
-      JSON.stringify({ error: String(err) }),
+      JSON.stringify({ error: "Erro interno" }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   }
