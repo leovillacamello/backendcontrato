@@ -716,7 +716,8 @@ function validarEntrada(dados: ContratoRequest): string | null {
 // Origens permitidas (adicionar domínio Lovable quando definido)
 const ORIGENS_PERMITIDAS = new Set([
   "https://adngbijkqkuaqwggjllo.supabase.co",
-  // "https://seu-projeto.lovable.app",  ← adicionar quando disponível
+  "https://soter-contratos-ps58ghmbn-leovillacamellos-projects.vercel.app",
+  "https://soter-contratos.vercel.app",
 ]);
 
 serve(async (req) => {
