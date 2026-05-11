@@ -742,6 +742,27 @@ serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
+  // 🔒 SEGURANÇA [VULN-5]: validar JWT antes de processar qualquer dado
+  const authHeader = req.headers.get("authorization") || "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) {
+    return new Response(
+      JSON.stringify({ error: "Autenticação necessária" }),
+      { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+  const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!);
+  const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(jwt);
+  if (authError || !user) {
+    return new Response(
+      JSON.stringify({ error: "Token inválido ou expirado" }),
+      { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+    );
+  }
+  // 🔒 SEGURANÇA [VULN-14]: identidade extraída do token para auditoria
+  const userId = user.id;
+  const userEmail = user.email ?? "";
+
   // Limite de tamanho do payload: 100 KB
   try {
     let dados: ContratoRequest;
@@ -1012,17 +1033,21 @@ serve(async (req) => {
     const docxBytes = zipSync(newZip);
 
     // ─── Salvar histórico
-    try {
-      await supabase.from("historico_contratos").insert({
-        sigla:         dados.sigla || "",
-        bloco:         dados.bloco || "",
-        unidade:       dados.unidade || "",
-        comprador:     ass1,
-        tipo_comissao: comissao.tipo,
-        valor_total:   preco,
-        nome_arquivo:  `${dados.sigla || ""} ${dados.unidade || ""} - Contrato.docx`.trim(),
-      });
-    } catch (_) { /* histórico não bloqueia geração */ }
+    // 🔒 SEGURANÇA [VULN-14]: registrar user_id para trilha de auditoria
+    const { error: histErr } = await supabase.from("historico_contratos").insert({
+      sigla:         dados.sigla || "",
+      bloco:         dados.bloco || "",
+      unidade:       dados.unidade || "",
+      comprador:     ass1,
+      tipo_comissao: comissao.tipo,
+      valor_total:   preco,
+      nome_arquivo:  `${dados.sigla || ""} ${dados.unidade || ""} - Contrato.docx`.trim(),
+      user_id:       userId,
+      user_email:    userEmail,
+    });
+    if (histErr) {
+      console.error("AUDIT_FAIL: histórico não salvo para usuário", userId, histErr.message);
+    }
 
     // ─── Retornar arquivo
     const filename = `${dados.sigla || ""} ${dados.unidade || ""} - Contrato Promessa de Compra e Venda.docx`.trim();
