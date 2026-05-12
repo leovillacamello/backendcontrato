@@ -11,6 +11,18 @@ const TAXA_COMISSAO = 0.043;
 
 // ─── TIPOS ───────────────────────────────────────────────────────────────────
 
+interface Conjuge {
+  nome: string;
+  cpf: string;
+  sexo?: string;
+  nacionalidade?: string;
+  profissao?: string;
+  rg?: string;
+  orgao_emissor?: string;
+  data_emissao?: string;
+  regime_bens?: string;
+}
+
 interface Comprador {
   nome: string;
   cpf: string;
@@ -21,6 +33,7 @@ interface Comprador {
   rg?: string;
   orgao_emissor?: string;
   data_emissao?: string;
+  conjuge?: Conjuge;
 }
 
 interface Parcela {
@@ -463,25 +476,56 @@ function isoBR(dateStr: string): string {
 
 // ─── COMPRADORA ──────────────────────────────────────────────────────────────
 
-function qualificar(c: Comprador): string {
-  const inscrito = (c.sexo || "M") === "M" ? "inscrito" : "inscrita";
-  const rgPart   = c.rg ? `, RG nº ${c.rg} expedido pelo ${c.orgao_emissor || ""}` : "";
+// estadoCivilAntes=true para união estável (ordem: nac, estado, prof)
+// estadoCivilAntes=false (padrão) para demais casos (ordem: nac, prof, estado)
+function qualificar(c: Comprador, estadoCivilAntes = false): string {
+  const inscrito = (c.sexo || "M") === "M" ? "inscrito"  : "inscrita";
+  const portador = (c.sexo || "M") === "M" ? "portador"  : "portadora";
+  const nac      = (c.nacionalidade || "brasileiro(a)").toLowerCase();
+  const prof     = (c.profissao || "").trim();
+  const estado   = c.estado_civil ? c.estado_civil.replace("(a)", "").trim() : "";
+  const midParts = estadoCivilAntes
+    ? [estado, prof].filter(Boolean)
+    : [prof, estado].filter(Boolean);
+  const rgPart = c.rg
+    ? `, ${portador} da identidade nº ${c.rg}${c.orgao_emissor ? ` do ${c.orgao_emissor}` : ""}${c.data_emissao ? ` em ${isoBR(c.data_emissao)}` : ""}`
+    : "";
   return (
-    `${c.nome}, ${(c.nacionalidade || "brasileiro(a)").toLowerCase()}, ` +
-    `${c.profissao || ""}, ${inscrito} no CPF/ME sob o nº ${c.cpf}${rgPart}`
+    `${c.nome}, ${nac}, ${midParts.join(", ")}, ` +
+    `${inscrito} no CPF/ME sob o nº ${c.cpf}${rgPart}`
   );
 }
 
-function qualificarSimples(c: Comprador): string {
-  return `${c.nome}, ${(c.nacionalidade || "brasileiro(a)").toLowerCase()}, ${c.profissao || ""}`;
+function qualificarSimples(c: { nome: string; nacionalidade?: string; profissao?: string }): string {
+  const nac   = (c.nacionalidade || "brasileiro(a)").toLowerCase();
+  const prof  = (c.profissao || "").trim();
+  const parts = [nac, prof].filter(Boolean);
+  return `${c.nome}, ${parts.join(", ")}`;
 }
 
-function rgStr(c: Comprador): string | null {
+function rgStr(c: { rg?: string; orgao_emissor?: string; data_emissao?: string }): string | null {
   if (!c.rg) return null;
   let s = c.rg;
   if (c.orgao_emissor) s += ` do ${c.orgao_emissor}`;
   if (c.data_emissao)  s += ` em ${isoBR(c.data_emissao)}`;
   return s;
+}
+
+function qualificarComConjuge(c: Comprador): string {
+  const conj = c.conjuge!;
+  const conjLabel = (conj.sexo || "F") === "F" ? "sua mulher" : "seu marido";
+  const regime = conj.regime_bens || "";
+  const cpfPart = `inscritos no CPF/ME sob os nºs ${c.cpf} e ${conj.cpf}`;
+  const rg1 = rgStr(c), rg2 = rgStr(conj);
+  let rgPart = "";
+  if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
+  else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
+  else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
+  return (
+    `${qualificarSimples(c)}, e ${conjLabel} ${qualificarSimples(conj)}, ` +
+    `casados pelo regime da ${regime.toLowerCase()}, ` +
+    `${cpfPart}${rgPart}`
+  );
 }
 
 function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
@@ -502,23 +546,24 @@ function montarCompradora(dados: ContratoRequest): string {
   const regime      = dados.regime_bens || "";
   const endereco    = dados.endereco || "";
 
+  // Formata um comprador, usando o bloco de cônjuge se tiver
+  const fmt = (c: Comprador) => c.conjuge?.nome ? qualificarComConjuge(c) : qualificar(c);
+
   if (compradores.length === 1) {
-    return `${qualificar(compradores[0])}, residente(s) na ${endereco}`;
+    return `${fmt(compradores[0])}, residente(s) na ${endereco}`;
   }
 
   const [c1, c2] = compradores;
 
-  if (relacao === "casado") {
+  // Fluxo legado: dois compradores são o casal (sem conjuge sub-objeto)
+  if (relacao === "casado" && !c1.conjuge) {
     const conj = (c2.sexo || "F") === "F" ? "sua mulher" : "seu marido";
-
     const cpfPart = `inscritos no CPF/ME sob os nºs ${c1.cpf} e ${c2.cpf}`;
-
     const rg1 = rgStr(c1), rg2 = rgStr(c2);
     let rgPart = "";
     if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
     else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
     else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
-
     return (
       `${qualificarSimples(c1)}, e ${conj} ${qualificarSimples(c2)}, ` +
       `casados pelo regime da ${regime.toLowerCase()}, ` +
@@ -528,14 +573,17 @@ function montarCompradora(dados: ContratoRequest): string {
   }
 
   if (relacao === "união estável") {
-    const dataPart = dados.data_escritura ? ` desde ${dados.data_escritura}` : "";
+    const regimePart    = regime ? ` com ${regime.toLowerCase()}` : "";
+    const dataEscritura = dados.data_escritura ? ` assinada em ${isoBR(dados.data_escritura)}` : "";
     return (
-      `${qualificar(c1)}, e ${qualificar(c2)}, ` +
-      `companheiros em união estável${dataPart}, residentes na ${endereco}`
+      `(1) ${qualificar(c1, true)}; e (2) ${qualificar(c2, true)}, residentes na ${endereco}, ` +
+      `ambos declaram viver em união estável${regimePart} através de escritura pública declaratória${dataEscritura}, ` +
+      `independentemente de gênero e número, sendo ambos solidariamente responsáveis e representantes entre si`
     );
   }
 
-  return `${qualificar(c1)}, e ${qualificar(c2)}, residentes na ${endereco}`;
+  // Dois compradores independentes, cada um possivelmente com cônjuge
+  return `(1) ${fmt(c1)}; e (2) ${fmt(c2)}, residentes na ${endereco}`;
 }
 
 // ─── DOCX: SUBSTITUIÇÃO E MERGE ──────────────────────────────────────────────
