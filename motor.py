@@ -3,6 +3,8 @@ import io
 import os
 import copy
 from docx import Document
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 TAXA_COMISSAO = 0.043
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +22,25 @@ def formatar_percentual(valor):
 
 def extenso(valor):
     return f"{formatar(valor)} reais"
+
+def _iso_to_br(date_str):
+    if not date_str or len(date_str) != 10:
+        return date_str
+    try:
+        y, m, d = date_str.split('-')
+        return f"{d}/{m}/{y}"
+    except Exception:
+        return date_str
+
+def formatar_telefone(tel):
+    digits = re.sub(r'\D', '', tel or '')
+    if digits.startswith('55') and len(digits) > 11:
+        digits = digits[2:]
+    if len(digits) == 11:
+        return f"({digits[:2]}) {digits[2:7]}-{digits[7:]}"
+    if len(digits) == 10:
+        return f"({digits[:2]}) {digits[2:6]}-{digits[6:]}"
+    return tel
 
 # ───────── COMISSÃO ─────────────────────────────────────────────────────────
 
@@ -147,6 +168,22 @@ def qualificar(c):
         f"{c.get('profissao', '')}, {inscrito} no CPF/ME sob o nº {c['cpf']}{rg_part}"
     )
 
+def _qualificar_simples(c):
+    return (
+        f"{c['nome']}, {c.get('nacionalidade', 'brasileiro(a)').lower()}, "
+        f"{c.get('profissao', '')}"
+    )
+
+def _rg_str(c):
+    if not c.get("rg"):
+        return None
+    s = c["rg"]
+    if c.get("orgao_emissor"):
+        s += f" do {c['orgao_emissor']}"
+    if c.get("data_emissao"):
+        s += f" em {_iso_to_br(c['data_emissao'])}"
+    return s
+
 def montar_compradora(dados):
     compradores = dados["compradores"]
     relacao     = dados.get("relacao", "solteiro / independentes")
@@ -159,11 +196,27 @@ def montar_compradora(dados):
     c1, c2 = compradores[0], compradores[1]
 
     if relacao == "casado":
-        conj = "sua esposa" if c2.get("sexo") == "F" else "seu esposo"
+        conj = "sua mulher" if c2.get("sexo") == "F" else "seu marido"
+
+        cpf_part = f"inscritos no CPF/ME sob os nºs {c1['cpf']} e {c2['cpf']}"
+
+        rg1, rg2 = _rg_str(c1), _rg_str(c2)
+        if rg1 and rg2:
+            rg_part = f", portadores das identidades nºs {rg1} e {rg2}"
+        elif rg1:
+            rg_part = f", portador(a) da identidade nº {rg1}"
+        elif rg2:
+            rg_part = f", portador(a) da identidade nº {rg2}"
+        else:
+            rg_part = ""
+
         return (
-            f"{qualificar(c1)}, e {conj} {qualificar(c2)}, "
-            f"casados pelo regime de {regime}, residentes na {endereco}"
+            f"{_qualificar_simples(c1)}, e {conj} {_qualificar_simples(c2)}, "
+            f"casados pelo regime da {regime.lower()}, "
+            f"{cpf_part}{rg_part}, "
+            f"residente(s) na {endereco}"
         )
+
     if relacao == "união estável":
         data_esc  = dados.get("data_escritura", "")
         data_part = f" desde {data_esc}" if data_esc else ""
@@ -197,6 +250,12 @@ def _mesclar(doc_base, doc_extra):
     """Adiciona o conteúdo de doc_extra ao final de doc_base."""
     for element in doc_extra.element.body:
         doc_base.element.body.append(copy.deepcopy(element))
+
+def _force_page_break_before(paragraph):
+    pPr = paragraph._p.get_or_add_pPr()
+    pb = OxmlElement('w:pageBreakBefore')
+    pb.set(qn('w:val'), '1')
+    pPr.append(pb)
 
 # ───────── NÚCLEO DE GERAÇÃO ────────────────────────────────────────────────
 
@@ -243,13 +302,13 @@ def _gerar_buffer(dados: dict) -> io.BytesIO:
         imob_str = im.get("empresa", "") or im.get("nome", "")
 
     # Comunicação = telefone + e-mail do comprador
-    tel    = dados.get("telefone", "")
+    tel    = formatar_telefone(dados.get("telefone", ""))
     email  = dados.get("email", "")
     comunicacao = " | ".join(filter(None, [tel, email]))
 
     # Tipo de assinatura legível
     tipo_ass_raw = dados.get("tipo_ass", "digital")
-    tipo_ass_str = "Eletrônica" if tipo_ass_raw == "digital" else "Presencial"
+    tipo_ass_str = "meio digital" if tipo_ass_raw == "digital" else "2 (duas) vias físicas de igual forma e teor"
 
     # Nomes para bloco de assinatura
     compradores = dados.get("compradores", [{}])
@@ -280,6 +339,12 @@ def _gerar_buffer(dados: dict) -> io.BytesIO:
 
     _substituir_doc(doc_contrato, subs_contrato)
     _substituir_doc(doc_corpo,    subs_corpo)
+
+    for p in doc_corpo.paragraphs:
+        if p.text.strip().startswith('E por assim se acharem'):
+            _force_page_break_before(p)
+            break
+
     _mesclar(doc_contrato, doc_corpo)
 
     buf = io.BytesIO()
