@@ -416,7 +416,7 @@ function substituirComunicacao(xml: string, dados: ContratoRequest): string {
   const linhas: string[] = [];
   if (dados.compradores[0]?.nome) linhas.push(`At.: ${escapeXml(dados.compradores[0].nome)}`);
   if (dados.endereco)              linhas.push(`End.: ${escapeXml(dados.endereco)}`);
-  if (dados.telefone)              linhas.push(`Tel.: ${escapeXml(dados.telefone)}`);
+  if (dados.telefone)              linhas.push(`Tel.: ${escapeXml(formatarTelefone(dados.telefone))}`);
   if (dados.email)                 linhas.push(`E-mail: ${escapeXml(dados.email)}`);
 
   if (linhas.length === 0) return xml.substring(0, rStart) + xml.substring(rEnd);
@@ -444,6 +444,23 @@ function substituirComunicacao(xml: string, dados: ContratoRequest): string {
   return resultado;
 }
 
+function formatarTelefone(tel: string): string {
+  if (!tel) return tel;
+  const digits = tel.replace(/\D/g, "");
+  const d = digits.startsWith("55") && digits.length > 11 ? digits.slice(2) : digits;
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return tel;
+}
+
+function isoBR(dateStr: string): string {
+  if (!dateStr || dateStr.length !== 10) return dateStr;
+  try {
+    const [y, m, d] = dateStr.split("-");
+    return `${d}/${m}/${y}`;
+  } catch { return dateStr; }
+}
+
 // ─── COMPRADORA ──────────────────────────────────────────────────────────────
 
 function qualificar(c: Comprador): string {
@@ -453,6 +470,18 @@ function qualificar(c: Comprador): string {
     `${c.nome}, ${(c.nacionalidade || "brasileiro(a)").toLowerCase()}, ` +
     `${c.profissao || ""}, ${inscrito} no CPF/ME sob o nº ${c.cpf}${rgPart}`
   );
+}
+
+function qualificarSimples(c: Comprador): string {
+  return `${c.nome}, ${(c.nacionalidade || "brasileiro(a)").toLowerCase()}, ${c.profissao || ""}`;
+}
+
+function rgStr(c: Comprador): string | null {
+  if (!c.rg) return null;
+  let s = c.rg;
+  if (c.orgao_emissor) s += ` do ${c.orgao_emissor}`;
+  if (c.data_emissao)  s += ` em ${isoBR(c.data_emissao)}`;
+  return s;
 }
 
 function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
@@ -480,10 +509,21 @@ function montarCompradora(dados: ContratoRequest): string {
   const [c1, c2] = compradores;
 
   if (relacao === "casado") {
-    const conj = (c2.sexo || "F") === "F" ? "sua esposa" : "seu esposo";
+    const conj = (c2.sexo || "F") === "F" ? "sua mulher" : "seu marido";
+
+    const cpfPart = `inscritos no CPF/ME sob os nºs ${c1.cpf} e ${c2.cpf}`;
+
+    const rg1 = rgStr(c1), rg2 = rgStr(c2);
+    let rgPart = "";
+    if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
+    else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
+    else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
+
     return (
-      `${qualificar(c1)}, e ${conj} ${qualificar(c2)}, ` +
-      `casados pelo regime de ${regime}, residentes na ${endereco}`
+      `${qualificarSimples(c1)}, e ${conj} ${qualificarSimples(c2)}, ` +
+      `casados pelo regime da ${regime.toLowerCase()}, ` +
+      `${cpfPart}${rgPart}, ` +
+      `residente(s) na ${endereco}`
     );
   }
 
@@ -583,6 +623,32 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
   }
 
   return resultado;
+}
+
+function addPageBreakBefore(xml: string, textMarker: string): string {
+  const idx = xml.indexOf(textMarker);
+  if (idx === -1) return xml;
+
+  let pStart = -1;
+  let pos = idx;
+  while (pos > 0) {
+    const candidate = xml.lastIndexOf("<w:p", pos);
+    if (candidate === -1) break;
+    const charAfter = xml[candidate + 4];
+    if (charAfter === ">" || charAfter === " ") { pStart = candidate; break; }
+    pos = candidate - 1;
+  }
+  if (pStart === -1) return xml;
+
+  const pageBreakEl = "<w:pageBreakBefore/>";
+  const pPrCloseIdx = xml.indexOf("</w:pPr>", pStart);
+  const nextPStart  = xml.indexOf("<w:p", pStart + 4);
+
+  if (pPrCloseIdx !== -1 && (nextPStart === -1 || pPrCloseIdx < nextPStart)) {
+    return xml.substring(0, pPrCloseIdx) + pageBreakEl + xml.substring(pPrCloseIdx);
+  }
+  const pTagEnd = xml.indexOf(">", pStart) + 1;
+  return xml.substring(0, pTagEnd) + `<w:pPr>${pageBreakEl}</w:pPr>` + xml.substring(pTagEnd);
 }
 
 function escapeXml(str: string): string {
@@ -882,7 +948,9 @@ serve(async (req) => {
     // ─── Comunicação — tratada por substituirComunicacao() após substituir()
 
     // ─── Assinatura
-    const tipoAssStr = dados.tipo_ass === "digital" ? "Eletrônica" : "Presencial";
+    const tipoAssStr = dados.tipo_ass === "digital"
+      ? "meio digital"
+      : "2 (duas) vias físicas de igual forma e teor";
     const ass1       = dados.compradores[0]?.nome || "";
     const ass2       = dados.compradores[1]?.nome || "";
 
@@ -930,6 +998,7 @@ serve(async (req) => {
     xml1 = substituirPagamento(xml1, parcelas, descontoComp);
     xml1 = substituirComunicacao(xml1, dados);
 
+    xml2 = addPageBreakBefore(xml2, "E por assim se acharem");
     xml2 = substituir(xml2, {
       "«ASS_1»":           ass1,
       "«ASS_2»":           ass2,
