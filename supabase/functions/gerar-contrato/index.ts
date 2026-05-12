@@ -1101,6 +1101,30 @@ serve(async (req) => {
     const newZip    = zipBase;
     const docxBytes = zipSync(newZip);
 
+    // ─── Retornar arquivo
+    const filename        = `${dados.sigla || ""} ${dados.unidade || ""} - Contrato Promessa de Compra e Venda.docx`.trim();
+    const safeFilename    = filename.replace(/[^\w\s\-\.]/g, "_");
+    const encodedFilename = encodeURIComponent(safeFilename);
+
+    // ─── Upload do arquivo gerado no Storage
+    const year = new Date().getFullYear();
+    const ts   = Date.now();
+    const storagePath = `${dados.sigla}/${year}/${dados.unidade}-${ts}.docx`;
+    let savedPath = "";
+    try {
+      await supabase.storage.createBucket("contratos", { public: false }).catch(() => {});
+      const { error: upErr } = await supabase.storage
+        .from("contratos")
+        .upload(storagePath, docxBytes, {
+          contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          upsert: false,
+        });
+      if (upErr) console.error("Storage upload error:", upErr.message);
+      else savedPath = storagePath;
+    } catch (e) {
+      console.error("Storage upload failed:", e);
+    }
+
     // ─── Salvar histórico
     // 🔒 SEGURANÇA [VULN-14]: registrar user_id para trilha de auditoria
     const { error: histErr } = await supabase.from("historico_contratos").insert({
@@ -1110,18 +1134,14 @@ serve(async (req) => {
       comprador:     ass1,
       tipo_comissao: comissao.tipo,
       valor_total:   preco,
-      nome_arquivo:  `${dados.sigla || ""} ${dados.unidade || ""} - Contrato.docx`.trim(),
+      nome_arquivo:  filename,
+      storage_path:  savedPath,
       user_id:       userId,
       user_email:    userEmail,
     });
     if (histErr) {
       console.error("AUDIT_FAIL: histórico não salvo para usuário", userId, histErr.message);
     }
-
-    // ─── Retornar arquivo
-    const filename = `${dados.sigla || ""} ${dados.unidade || ""} - Contrato Promessa de Compra e Venda.docx`.trim();
-    const safeFilename = filename.replace(/[^\w\s\-\.]/g, "_");
-    const encodedFilename = encodeURIComponent(safeFilename);
 
     return new Response(docxBytes, {
       headers: {
