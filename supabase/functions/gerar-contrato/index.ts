@@ -84,33 +84,16 @@ interface ContratoRequest {
 }
 
 // ─── EMPREENDIMENTOS ─────────────────────────────────────────────────────────
-// Siglas válidas. Basta adicionar a sigla aqui e subir os 4 arquivos no Storage
-// seguindo o padrão: "[SIGLA] contrato_cabeca.docx", "[SIGLA] corpo_cabeca.docx",
-//                    "[SIGLA] contrato_faturado.docx", "[SIGLA] corpo_faturado.docx"
-//
-// Exceções: empreendimentos que usam nome diferente da sigla no arquivo
-const NOME_ARQUIVO: Record<string, string> = {
-  // Se os demais usarem a própria sigla, não precisa adicionar aqui
-};
-
-const SIGLAS_ATIVAS = new Set([
-  "DMS",  // Clarice
-  "AAZ",  // Origem
-  "BAK",  // Attrium Icaraí
-  "BCO",  // Ion Icaraí
-  "H23",  // Maestro
-  "SMK",  // Pulse
-]);
+// Siglas válidas vêm da tabela `empreendimentos` no Supabase.
+// Basta inserir uma linha na tabela e subir os 4 arquivos no Storage:
+// "[SIGLA] contrato_cabeca.docx", "[SIGLA] corpo_cabeca.docx",
+// "[SIGLA] contrato_faturado.docx", "[SIGLA] corpo_faturado.docx"
 
 function getTemplates(sigla: string, tipo: string) {
   const s = sigla?.toUpperCase();
-  if (!SIGLAS_ATIVAS.has(s)) {
-    throw new Error(`Empreendimento não reconhecido: ${sigla}`);
-  }
-  const prefixo = NOME_ARQUIVO[s] || s;
   return tipo === "destacada"
-    ? { contrato: `${prefixo} contrato_cabeca.docx`,  corpo: `${prefixo} corpo_cabeca.docx`  }
-    : { contrato: `${prefixo} contrato_faturado.docx`, corpo: `${prefixo} corpo_faturado.docx` };
+    ? { contrato: `${s} contrato_cabeca.docx`,  corpo: `${s} corpo_cabeca.docx`  }
+    : { contrato: `${s} contrato_faturado.docx`, corpo: `${s} corpo_faturado.docx` };
 }
 
 // ─── FORMATAÇÃO ──────────────────────────────────────────────────────────────
@@ -768,18 +751,13 @@ function mesclarDocs(xml1: string, xml2: string): string {
   return beforeSectPr + quadroBreak + corpo2 + corpoSectPr + BODY_CLOSE + suffix;
 }
 
-// ─── SIGLAS PERMITIDAS ───────────────────────────────────────────────────────
-const SIGLAS_VALIDAS = SIGLAS_ATIVAS;
-
 // ─── VALIDAÇÃO DE ENTRADA ────────────────────────────────────────────────────
 function validarEntrada(dados: ContratoRequest): string | null {
   if (!dados || typeof dados !== "object") return "Payload inválido";
 
-  // sigla
+  // sigla — presença verificada aqui; existência no banco verificada depois
   if (!dados.sigla || typeof dados.sigla !== "string")
     return "Campo obrigatório: sigla";
-  if (!SIGLAS_VALIDAS.has(dados.sigla))
-    return `Sigla inválida`;
 
   // unidade
   if (!dados.unidade || typeof dados.unidade !== "string")
@@ -910,6 +888,19 @@ serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+    // ─── Validar sigla contra a tabela empreendimentos
+    const { data: empRow } = await supabase
+      .from("empreendimentos")
+      .select("sigla")
+      .eq("sigla", dados.sigla)
+      .single();
+    if (!empRow) {
+      return new Response(
+        JSON.stringify({ error: `Empreendimento não encontrado: ${dados.sigla}` }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
 
     // ─── Parcelas e preço
     let parcelas: Parcela[];
