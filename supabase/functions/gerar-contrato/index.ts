@@ -59,7 +59,58 @@ interface Imobiliaria {
   valor?: number;
 }
 
+// ─── SLOTS (novo modelo multi-comprador) ─────────────────────────────────────
+
+interface ParceiroSlot {
+  nome: string;
+  cpf: string;
+  sexo?: string;
+  nacionalidade?: string;
+  profissao?: string;
+  rg?: string;
+  orgao_emissor?: string;
+  data_emissao?: string;
+  relacao: "casado" | "união estável";
+  regime?: string;
+  data_escritura?: string;
+}
+
+interface PFSlot {
+  tipo: "PF";
+  nome: string;
+  cpf: string;
+  sexo?: string;
+  nacionalidade?: string;
+  profissao?: string;
+  estado_civil?: string;
+  rg?: string;
+  orgao_emissor?: string;
+  data_emissao?: string;
+  parceiro?: ParceiroSlot;
+}
+
+interface RepresentanteSlot {
+  nome: string;
+  cpf?: string;
+  sexo?: string;
+  profissao?: string;
+  rg?: string;
+  orgao_emissor?: string;
+  data_emissao?: string;
+}
+
+interface PJSlot {
+  tipo: "PJ";
+  razao_social: string;
+  cnpj?: string;
+  endereco_pj?: string;
+  representante?: RepresentanteSlot;
+}
+
+type Slot = PFSlot | PJSlot;
+
 interface ContratoRequest {
+  slots?: Slot[];
   compradores: Comprador[];
   relacao?: string;
   regime_bens?: string;
@@ -511,6 +562,88 @@ function qualificarComConjuge(c: Comprador): string {
   );
 }
 
+// ─── QUALIFICAÇÃO PJ ─────────────────────────────────────────────────────────
+
+function qualificarPJ(slot: PJSlot): string {
+  const cnpj = slot.cnpj ? `, inscrita no CNPJ/ME sob o nº ${slot.cnpj}` : "";
+  const sede  = slot.endereco_pj ? `, com sede na ${slot.endereco_pj}` : "";
+  const rep   = slot.representante;
+  let repPart = "";
+  if (rep?.nome) {
+    const s   = (rep.sexo || "M") === "M" ? "M" : "F";
+    const ins  = s === "M" ? "inscrito" : "inscrita";
+    const por  = s === "M" ? "portador" : "portadora";
+    const nac  = ((rep as any).nacionalidade || (s === "M" ? "brasileiro" : "brasileira")).toLowerCase();
+    const prof = rep.profissao ? `, ${rep.profissao}` : "";
+    const rg   = rep.rg ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}` : "";
+    const cpfR = rep.cpf ? `, ${ins} no CPF/ME sob o nº ${rep.cpf}` : "";
+    repPart = `, neste ato representada por ${rep.nome}, ${nac}${prof}${cpfR}${rg}`;
+  }
+  return `${slot.razao_social}${cnpj}${sede}${repPart}`;
+}
+
+// ─── QUALIFICAÇÃO PF COM PARCEIRO ─────────────────────────────────────────────
+
+function qualificarPFComParceiro(slot: PFSlot): string {
+  const parc = slot.parceiro!;
+  const c: Comprador = {
+    nome: slot.nome, cpf: slot.cpf, sexo: slot.sexo,
+    nacionalidade: slot.nacionalidade, profissao: slot.profissao,
+    rg: slot.rg, orgao_emissor: slot.orgao_emissor, data_emissao: slot.data_emissao,
+  };
+
+  if (parc.relacao === "casado") {
+    const conjuge: Conjuge = {
+      nome: parc.nome, cpf: parc.cpf, sexo: parc.sexo,
+      nacionalidade: parc.nacionalidade, profissao: parc.profissao,
+      rg: parc.rg, orgao_emissor: parc.orgao_emissor, data_emissao: parc.data_emissao,
+      regime_bens: parc.regime,
+    };
+    return qualificarComConjuge({ ...c, conjuge });
+  }
+
+  // União estável
+  const pSexo = (parc.sexo || "F") === "F" ? "F" : "M";
+  const conjLabel   = pSexo === "F" ? "sua companheira" : "seu companheiro";
+  const regime      = parc.regime || "";
+  const regimePart  = regime ? ` com ${regime.toLowerCase()}` : "";
+  const dataEsc     = parc.data_escritura ? ` assinada em ${isoBR(parc.data_escritura)}` : "";
+  const cpfPart     = `inscritos no CPF/ME sob os nºs ${slot.cpf} e ${parc.cpf}`;
+  const rg1 = rgStr(c), rg2 = rgStr(parc as any);
+  let rgPart = "";
+  if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
+  else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
+  else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
+
+  return (
+    `${qualificarSimples(c)}, e ${conjLabel} ${qualificarSimples(parc as any)}, ` +
+    `${cpfPart}${rgPart}, ` +
+    `que declaram viver em união estável${regimePart} através de escritura pública declaratória${dataEsc}`
+  );
+}
+
+// ─── MONTAR COMPRADORA A PARTIR DE SLOTS ──────────────────────────────────────
+
+function montarCompradoraFromSlots(dados: ContratoRequest): string {
+  const slots   = dados.slots!;
+  const endereco = dados.endereco || "";
+
+  const parts = slots.map((slot) => {
+    if (slot.tipo === "PJ") return qualificarPJ(slot as PJSlot);
+    const pf = slot as PFSlot;
+    if (pf.parceiro) return qualificarPFComParceiro(pf);
+    return qualificar(pf as unknown as Comprador);
+  });
+
+  if (parts.length === 1) {
+    return `${parts[0]}, residente(s) na ${endereco}`;
+  }
+
+  const numbered = parts.map((p, i) => `(${i + 1}) ${p}`);
+  const last = numbered.pop()!;
+  return `${numbered.join("; ")}; e ${last}, residentes na ${endereco}`;
+}
+
 function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
   if (!imobiliarias?.length) return "";
   const partes = imobiliarias.map(im => {
@@ -524,6 +657,10 @@ function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
 }
 
 function montarCompradora(dados: ContratoRequest): string {
+  if (dados.slots && dados.slots.length > 0) {
+    return montarCompradoraFromSlots(dados);
+  }
+
   const compradores = dados.compradores;
   const relacao     = dados.relacao || "solteiro / independentes";
   const regime      = dados.regime_bens || "";
@@ -765,15 +902,27 @@ function validarEntrada(dados: ContratoRequest): string | null {
   if (dados.unidade.length > 20)
     return "unidade: máximo 20 caracteres";
 
-  // compradores
-  if (!Array.isArray(dados.compradores) || dados.compradores.length === 0)
-    return "Campo obrigatório: compradores (array com ao menos 1 item)";
-  if (dados.compradores.length > 2)
-    return "compradores: máximo 2 compradores";
-  for (const c of dados.compradores) {
-    if (!c.nome || typeof c.nome !== "string") return "Comprador: nome obrigatório";
-    if (!c.cpf  || typeof c.cpf  !== "string") return "Comprador: cpf obrigatório";
-    if (c.nome.length > 200) return "Comprador: nome muito longo";
+  // compradores / slots
+  const hasSlots = Array.isArray(dados.slots) && dados.slots.length > 0;
+  const hasCompradores = Array.isArray(dados.compradores) && dados.compradores.length > 0;
+  if (!hasSlots && !hasCompradores)
+    return "Campo obrigatório: slots ou compradores (array com ao menos 1 item)";
+  if (hasSlots) {
+    for (const s of dados.slots!) {
+      if (s.tipo === "PJ") {
+        if (!s.razao_social) return "PJ: razao_social obrigatório";
+      } else {
+        const pf = s as PFSlot;
+        if (!pf.nome) return "Comprador PF: nome obrigatório";
+        if (!pf.cpf)  return "Comprador PF: cpf obrigatório";
+      }
+    }
+  } else {
+    for (const c of dados.compradores) {
+      if (!c.nome || typeof c.nome !== "string") return "Comprador: nome obrigatório";
+      if (!c.cpf  || typeof c.cpf  !== "string") return "Comprador: cpf obrigatório";
+      if (c.nome.length > 200) return "Comprador: nome muito longo";
+    }
   }
 
   // preço
@@ -996,8 +1145,9 @@ serve(async (req) => {
     const tipoAssStr = dados.tipo_ass === "digital"
       ? "meio digital"
       : "2 (duas) vias físicas de igual forma e teor";
-    const ass1       = dados.compradores[0]?.nome || "";
-    const ass2       = dados.compradores[1]?.nome || "";
+    const slotName = (s?: Slot) => !s ? "" : s.tipo === "PJ" ? s.razao_social : (s as PFSlot).nome || "";
+    const ass1 = dados.slots?.length ? slotName(dados.slots[0]) : (dados.compradores[0]?.nome || "");
+    const ass2 = dados.slots?.length ? slotName(dados.slots[1]) : (dados.compradores[1]?.nome || "");
 
     // ─── Valores líquidos (destacada = preço e sinal já descontados da comissão)
     const totalComissao = dados.corretores?.length
