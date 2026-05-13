@@ -300,9 +300,9 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
           : [comps[0].valor, Math.max(0, comps[1].valor - comissao)];
         const total = val1 + val2;
         const data1 = comps[0].data || "";
-        const reaj  = comps[0].reajustavel !== false ? "reajustável" : "fixo";
+        const reaj  = comps[0].reajustavel !== false ? "reajustáveis" : "fixas";
         textos.push(
-          `R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}s, ` +
+          `R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ` +
           `mensais, sucessivas, a primeira no valor de R$${formatar(val1)} (${extenso(val1)}) ` +
           `vencendo-se a primeira no dia ${data1} e a outra no valor de R$${formatar(val2)} ` +
           `(${extenso(val2)}) no mesmo dia do mês subsequente ("Parcelas de Complemento de Sinal");`
@@ -316,29 +316,29 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     const valorUnit = formatar(p.valor);
     const valorTot  = formatar(total);
     const data      = p.data || "";
-    const reaj      = p.reajustavel !== false ? "reajustável" : "fixo";
+    const reaj      = p.reajustavel !== false ? "reajustáveis" : "fixas";
 
     if (p.tipo === "financiamento" || p.tipo === "unica") {
       const label = p.tipo === "financiamento" ? "Parcela de Financiamento" : "Parcela Única";
+      const reajUnit = p.reajustavel !== false ? "reajustável" : "fixa";
       textos.push(
         `R$${valorUnit} (${extenso(p.valor)}) serão pagos em uma única ` +
-        `parcela ${reaj} com vencimento em ${data} ("${label}");`
+        `parcela ${reajUnit} com vencimento em ${data} ("${label}");`
       );
       continue;
     }
 
-    let descricao: string, period: string;
-    if      (p.tipo === "mensal")      { descricao = "Parcelas Mensais";                 period = "mensais"; }
-    else if (p.tipo === "anual")       { descricao = "Parcelas Anuais";                  period = "anuais"; }
-    else if (p.tipo === "semestral")   { descricao = "Parcelas Semestrais";              period = "semestrais"; }
-    else if (p.tipo === "complemento") { descricao = "Parcelas de Complemento de Sinal"; period = "mensais"; }
-    else                               { descricao = "Parcelas";                          period = "mensais"; }
+    let descricao: string, period: string, subsequente: string;
+    if      (p.tipo === "mensal")      { descricao = "Parcelas Mensais";                 period = "mensais";    subsequente = "no mesmo dia dos meses subsequentes"; }
+    else if (p.tipo === "anual")       { descricao = "Parcelas Anuais";                  period = "anuais";     subsequente = "no mesmo dia de doze em doze meses"; }
+    else if (p.tipo === "semestral")   { descricao = "Parcelas Semestrais";              period = "semestrais"; subsequente = "no mesmo dia de seis em seis meses"; }
+    else if (p.tipo === "complemento") { descricao = "Parcelas de Complemento de Sinal"; period = "mensais";    subsequente = "no mesmo dia dos meses subsequentes"; }
+    else                               { descricao = "Parcelas";                          period = "mensais";    subsequente = "no mesmo dia dos meses subsequentes"; }
 
     textos.push(
       `R$${valorTot} (${extenso(total)}) serão pagos em ${qtd} parcelas ` +
-      `${reaj}s, ${period}, sucessivas, no valor de R$${valorUnit} (${extenso(p.valor)}) ` +
-      `cada uma delas, vencendo-se a primeira no dia ${data} e as demais no mesmo dia dos ` +
-      `${period} subsequentes ("${descricao}");`
+      `${reaj}, ${period}, sucessivas, no valor de R$${valorUnit} (${extenso(p.valor)}) ` +
+      `cada uma delas, vencendo-se a primeira no dia ${data} e as demais ${subsequente} ("${descricao}");`
     );
   }
   return textos;
