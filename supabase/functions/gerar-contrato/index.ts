@@ -890,12 +890,14 @@ serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
     // ─── Validar sigla contra a tabela empreendimentos
-    const { data: empRow } = await supabase
+    const { data: empRow, error: empError } = await supabase
       .from("empreendimentos")
       .select("sigla")
       .eq("sigla", dados.sigla)
       .single();
-    if (!empRow) {
+    if (empError) {
+      console.error("Erro ao validar empreendimento:", empError.message, "sigla:", dados.sigla);
+    } else if (!empRow) {
       return new Response(
         JSON.stringify({ error: `Empreendimento não encontrado: ${dados.sigla}` }),
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
