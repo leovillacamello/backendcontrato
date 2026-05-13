@@ -1009,7 +1009,7 @@ serve(async (req) => {
     const precoExibido = comissao.tipo === "destacada"
       ? Math.max(0, preco - totalComissao)
       : preco;
-    const percentual = preco > 0 ? (sinalExibido / preco * 100) : 0;
+    const percentual = precoExibido > 0 ? (sinalExibido / precoExibido * 100) : 0;
 
     // ─── Substituições
     xml1 = substituir(xml1, {
@@ -1018,7 +1018,7 @@ serve(async (req) => {
       "«IMOBILIARIA»":       imobStr,
       "«PORCENTAGEMSINAL»":  formatarPercentual(percentual),
       "«PRECO»":             `${formatar(precoExibido)} (${extenso(precoExibido)})`,
-      "«SINAL»":             formatar(sinalExibido),
+      "«SINAL»":             `R$${formatar(sinalExibido)} (${extenso(sinalExibido)})`,
       "«UNIDADE»":           dados.unidade || "",
       "«VAGAS»":             vagas,
       "«VLR_COMISSAO»":      `R$${formatar(totalComissao)} (${extenso(totalComissao)})`,
