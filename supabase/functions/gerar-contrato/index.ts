@@ -749,16 +749,20 @@ function mesclarDocs(xml1: string, xml2: string): string {
   const beforeSectPr = bodyContent.substring(0, lastSectPrIdx);
   const sectPr       = bodyContent.substring(lastSectPrIdx, sectPrEndIdx + sectPrEndTag.length);
 
-  // sectPr do corpo: sem continuous, reinicia na página 1
-  let corpoSectPr = sectPr.replace(/<w:type\s+w:val="continuous"\s*\/>/g, "");
+  // sectPr do corpo: remove qualquer type, reinicia na página 1
+  let corpoSectPr = sectPr.replace(/<w:type\b[^/]*\/>/g, "");
   corpoSectPr = corpoSectPr.replace(/<w:pgNumType\b[^/]*\/>/g, "");
   corpoSectPr = corpoSectPr.replace("</w:sectPr>", '<w:pgNumType w:start="1"/></w:sectPr>');
 
   // Se o quadro não tem sectPr intermediário (ex: BAK), insere um parágrafo de quebra
-  // de seção usando o sectPr original do template (mantém refs de footer e tamanho de página)
+  // de seção usando o sectPr original do template (mantém refs de footer e tamanho de página).
+  // Remove w:type para garantir nextPage (padrão) — continuous impede SECTIONPAGES de funcionar.
   const quadroTemBreak = beforeSectPr.includes("<w:sectPr");
   const quadroBreak = quadroTemBreak ? "" :
-    `<w:p><w:pPr>${sectPr.replace(/<w:pgNumType\b[^/]*\/>/g, "")}</w:pPr></w:p>`;
+    `<w:p><w:pPr>${sectPr
+      .replace(/<w:type\b[^/]*\/>/g, "")
+      .replace(/<w:pgNumType\b[^/]*\/>/g, "")
+    }</w:pPr></w:p>`;
 
   // Resultado: [quadro] + [break se necessário] + [corpo] + [sectPr corpo] + </w:body>
   return beforeSectPr + quadroBreak + corpo2 + corpoSectPr + BODY_CLOSE + suffix;
