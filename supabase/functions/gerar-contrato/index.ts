@@ -622,7 +622,7 @@ function qualificarPFComParceiro(slot: PFSlot): string {
   const conjLabel   = pSexo === "F" ? "sua companheira" : "seu companheiro";
   const regime      = parc.regime || "";
   const regimePart  = regime ? ` com ${regime.toLowerCase()}` : "";
-  const dataEsc     = parc.data_escritura ? ` assinada em ${dataExtenso(parc.data_escritura)}` : "";
+  const dataEsc     = parc.data_escritura ? ` assinada em ${isoBR(parc.data_escritura)}` : "";
   const cpfPart     = `inscritos no CPF/ME sob os nºs ${slot.cpf} e ${parc.cpf}`;
   const rg1 = rgStr(c), rg2 = rgStr(parc as any);
   let rgPart = "";
@@ -709,7 +709,7 @@ function montarCompradora(dados: ContratoRequest): string {
 
   if (relacao === "união estável") {
     const regimePart    = regime ? ` com ${regime.toLowerCase()}` : "";
-    const dataEscritura = dados.data_escritura ? ` assinada em ${dataExtenso(dados.data_escritura)}` : "";
+    const dataEscritura = dados.data_escritura ? ` assinada em ${isoBR(dados.data_escritura)}` : "";
     return (
       `(1) ${qualificar(c1, true)}; e (2) ${qualificar(c2, true)}, residentes na ${endereco}, ` +
       `ambos declaram viver em união estável${regimePart} através de escritura pública declaratória${dataEscritura}, ` +
