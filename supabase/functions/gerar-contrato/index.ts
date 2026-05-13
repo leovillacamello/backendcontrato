@@ -1097,18 +1097,21 @@ serve(async (req) => {
         new RegExp(`Id="(rId\\d+)"[^>]*Target="${quadroFileName}"`)
       );
 
-      // Cria footer do corpo se ainda não existir
+      // Cria/sobrescreve footer do corpo a partir do footer do quadro (sem "do Quadro-Resumo")
+      // Sempre sobrescreve — o template AAZ já tem footer2.xml mas com valores hardcoded
       const numQuadro  = parseInt(quadroKey.replace("word/footer", "").replace(".xml", "")) || 1;
       const corpoLocal = `footer${numQuadro + 1}.xml`;
       const corpoKey   = `word/${corpoLocal}`;
-      if (!zipBase[corpoKey]) {
-        let fCorpo = strFromU8(zipBase[quadroKey]);
-        fCorpo = fCorpo
-          .replace(/<w:r[^>]*><w:t[^>]*> do Quadro-Resumo<\/w:t><\/w:r>/g, "")
-          .replace(/ do Quadro-Resumo/g, "");
-        zipBase[corpoKey] = strToU8(fCorpo);
+      const corpoIsNew = !zipBase[corpoKey];
 
-        // Adiciona [Content_Types] para o novo arquivo
+      let fCorpo = strFromU8(zipBase[quadroKey]);
+      fCorpo = fCorpo
+        .replace(/<w:r[^>]*><w:t[^>]*> do Quadro-Resumo<\/w:t><\/w:r>/g, "")
+        .replace(/ do Quadro-Resumo/g, "");
+      zipBase[corpoKey] = strToU8(fCorpo);
+
+      if (corpoIsNew) {
+        // Arquivo era novo: adiciona Content_Types e relação
         const ctKey = "[Content_Types].xml";
         if (zipBase[ctKey]) {
           let ct = strFromU8(zipBase[ctKey]);
