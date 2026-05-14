@@ -192,8 +192,9 @@ function extenso(valor: number): string {
     return cent + (cent && resto ? " e " : "") + resto;
   }
 
-  const inteiro = Math.floor(valor);
-  const ctvs    = Math.round((valor - inteiro) * 100);
+  const cents   = Math.round(valor * 100);
+  const inteiro = Math.floor(cents / 100);
+  const ctvs    = cents % 100;
 
   let r = "";
   if (inteiro === 0) {
@@ -214,11 +215,11 @@ function extenso(valor: number): string {
 
 // ─── COMISSÃO ────────────────────────────────────────────────────────────────
 
-function definirTipoComissao(preco: number, sinal: number, p30 = 0, p60 = 0) {
+function definirTipoComissao(preco: number, sinal: number, p30 = 0, p60 = 0, taxa = TAXA_COMISSAO) {
   if (!preco || preco <= 0) {
     return { tipo: "faturada", total_comissao: 0, parcela_desconto: null };
   }
-  const comissao = Math.round(preco * TAXA_COMISSAO * 100) / 100;
+  const comissao = Math.round(preco * taxa * 100) / 100;
   const limiar   = preco * 0.10;
 
   let tipo: string;
@@ -1047,7 +1048,7 @@ serve(async (req) => {
     // ─── Validar sigla e buscar configuração de templates
     const { data: empRow, error: empError } = await supabase
       .from("empreendimentos")
-      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_faturada, template_corpo_faturada")
+      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_faturada, template_corpo_faturada, taxa_comissao")
       .eq("sigla", dados.sigla)
       .single();
     if (empError) {
@@ -1068,7 +1069,8 @@ serve(async (req) => {
     const p30        = comps[0]?.valor || 0;
     const p60        = comps[1]?.valor || 0;
 
-    const comissao = definirTipoComissao(preco, sinal, p30, p60);
+    const taxaEmp = ((empRow?.taxa_comissao as number) ?? 4.3) / 100;
+    const comissao = definirTipoComissao(preco, sinal, p30, p60, taxaEmp);
     const PARCELAS_VALIDAS = new Set(["ato", "complemento_30", "complemento_60"]);
     if (dados.parcela_desconto_manual) {
       if (!PARCELAS_VALIDAS.has(dados.parcela_desconto_manual))
