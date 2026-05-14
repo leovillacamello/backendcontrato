@@ -1235,6 +1235,7 @@ serve(async (req) => {
       "«FRACAO_IDEAL»":      fracaoIdeal,
       "«IMOBILIARIA»":       imobStr,
       "«PORCENTAGEMSINAL»":  formatarPercentual(percentual),
+      "«M__SINAL»":          formatarPercentual(percentual),
       "«PRECO»":             `R$${formatar(precoExibido)} (${extenso(precoExibido)})`,
       "«SINAL»":             `R$${formatar(sinalExibido)} (${extenso(sinalExibido)})`,
       "«UNIDADE»":           dados.unidade || "",
@@ -1266,7 +1267,8 @@ serve(async (req) => {
       "«ASS_1»":           ass1,
       "«ASS_2»":           ass2,
       "«Data_Assinatura»": dataExtenso(dados.data_assinatura || ""),
-      "«TIPO_ASS»":        tipoAssStr,
+      "«TIPO_ASS»":              tipoAssStr,
+      "«FORMA_DE_ASSINATURA»":   tipoAssStr,
       "«UNIDADE»":         dados.unidade || "",
     });
 
