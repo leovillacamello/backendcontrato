@@ -877,10 +877,10 @@ function substituir(xml: string, subs: Record<string, string>): string {
       const rPrM = runOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
       let runNew: string;
       if (rPrM) {
-        const rPrBold = rPrM[0].includes("<w:b/>")
-          ? rPrM[0]
-          : rPrM[0].replace("</w:rPr>", "<w:b/><w:bCs/></w:rPr>");
-        runNew = runOrig.replace(rPrM[0], rPrBold);
+        let rPrFixed = rPrM[0].replace(/<w:rFonts\b[^/]*\/>/g, ""); // remove font overrides
+        if (!rPrFixed.includes("<w:b/>"))
+          rPrFixed = rPrFixed.replace("</w:rPr>", "<w:b/><w:bCs/></w:rPr>");
+        runNew = runOrig.replace(rPrM[0], rPrFixed);
       } else {
         runNew = runOrig.replace(/(<w:r(?:\s[^>]*)?>)/, `$1<w:rPr><w:b/><w:bCs/></w:rPr>`);
       }
