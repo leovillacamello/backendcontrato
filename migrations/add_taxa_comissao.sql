@@ -1,0 +1,2 @@
+ALTER TABLE empreendimentos
+  ADD COLUMN IF NOT EXISTS taxa_comissao NUMERIC DEFAULT 4.3;
