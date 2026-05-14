@@ -9,6 +9,13 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TAXA_COMISSAO = 0.043;
 
+const CALIBRI_12 = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="24"/><w:szCs w:val="24"/>';
+
+// Placeholders that should be replaced without bold formatting
+const NO_BOLD_PLACEHOLDERS = new Set([
+  "«COMPRADORA»", "«IMOBILIARIA»", "«ASS_1»", "«ASS_2»", "«TIPO_ASS»",
+]);
+
 // ─── TIPOS ───────────────────────────────────────────────────────────────────
 
 interface Conjuge {
@@ -351,14 +358,16 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
   const origNumId  = numIdMatch ? numIdMatch[1] : null;
 
-  // Extrai <w:rPr> do run original para manter fonte — e garante negrito
+  // Extrai <w:rPr> do run original e força Calibri 12pt sem negrito
   const rPrMatch = paraOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
-  const rPrRaw   = rPrMatch ? rPrMatch[0] : "";
-  const rPr      = rPrRaw.includes("<w:b/>")
-    ? rPrRaw
-    : rPrRaw
-      ? rPrRaw.replace("</w:rPr>", "<w:b/><w:bCs/></w:rPr>")
-      : "<w:rPr><w:b/><w:bCs/></w:rPr>";
+  const rPrRaw   = rPrMatch ? rPrMatch[0] : "<w:rPr></w:rPr>";
+  const rPr = rPrRaw
+    .replace(/<w:rFonts\b[^/]*\/>/g, "")
+    .replace(/<w:sz\b[^>]*\/>/g, "")
+    .replace(/<w:szCs\b[^>]*\/>/g, "")
+    .replace(/<w:b\/>/g, "")
+    .replace(/<w:bCs\/>/g, "")
+    .replace("</w:rPr>", `${CALIBRI_12}</w:rPr>`);
 
   // Remove parágrafos "fantasma" logo após o placeholder: parágrafos que têm o
   // mesmo numId e contêm apenas "." (resíduo de template com lista numerada).
@@ -438,10 +447,16 @@ function substituirComunicacao(xml: string, dados: ContratoRequest): string {
 
   const runOrig  = xml.substring(rStart, rEnd);
   const rPrMatch = runOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
-  // Remove bold from rPr so communication text is never rendered bold
-  const rPr      = rPrMatch
-    ? rPrMatch[0].replace(/<w:b\/>/g, "").replace(/<w:bCs\/>/g, "")
-    : "";
+  // Remove bold and force Calibri 12pt for communication text
+  const rPr = rPrMatch
+    ? rPrMatch[0]
+        .replace(/<w:rFonts\b[^/]*\/>/g, "")
+        .replace(/<w:sz\b[^>]*\/>/g, "")
+        .replace(/<w:szCs\b[^>]*\/>/g, "")
+        .replace(/<w:b\/>/g, "")
+        .replace(/<w:bCs\/>/g, "")
+        .replace("</w:rPr>", `${CALIBRI_12}</w:rPr>`)
+    : `<w:rPr>${CALIBRI_12}</w:rPr>`;
 
   const linhas: string[] = [];
   if (dados.compradores[0]?.nome) linhas.push(`At.: ${escapeXml(dados.compradores[0].nome)}`);
@@ -745,13 +760,12 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
     content.includes("<w:jc ") ? m : open + content + '<w:jc w:val="center"/>' + close
   );
   // Força Calibri 12pt em todos os runs da linha
-  const fonteCalibri = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="24"/><w:szCs w:val="24"/>';
   rowNorm = rowNorm.replace(/(<w:rPr>)([\s\S]*?)(<\/w:rPr>)/g, (m, open, content, close) =>
-    open + content + fonteCalibri + close
+    open + content + CALIBRI_12 + close
   );
   // Runs sem rPr: insere rPr com Calibri 12pt antes de <w:t>
   rowNorm = rowNorm.replace(/(<w:r\b[^>]*>)(?![\s\S]{0,50}<w:rPr)(<w:t)/g,
-    `$1<w:rPr>${fonteCalibri}</w:rPr>$2`
+    `$1<w:rPr>${CALIBRI_12}</w:rPr>$2`
   );
 
   // Gera uma linha por corretor (sem limite fixo)
@@ -853,14 +867,23 @@ function substituir(xml: string, subs: Record<string, string>): string {
 
       const runOrig = result.substring(rStart, rEndFull);
       const rPrM = runOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
+      const isNoBold = NO_BOLD_PLACEHOLDERS.has(placeholder);
       let runNew: string;
       if (rPrM) {
-        let rPrFixed = rPrM[0].replace(/<w:rFonts\b[^/]*\/>/g, ""); // remove font overrides
-        if (!rPrFixed.includes("<w:b/>"))
+        let rPrFixed = rPrM[0]
+          .replace(/<w:rFonts\b[^/]*\/>/g, "")
+          .replace(/<w:sz\b[^>]*\/>/g, "")
+          .replace(/<w:szCs\b[^>]*\/>/g, "");
+        if (isNoBold) {
+          rPrFixed = rPrFixed.replace(/<w:b\/>/g, "").replace(/<w:bCs\/>/g, "");
+        } else if (!rPrFixed.includes("<w:b/>")) {
           rPrFixed = rPrFixed.replace("</w:rPr>", "<w:b/><w:bCs/></w:rPr>");
+        }
+        rPrFixed = rPrFixed.replace("</w:rPr>", `${CALIBRI_12}</w:rPr>`);
         runNew = runOrig.replace(rPrM[0], rPrFixed);
       } else {
-        runNew = runOrig.replace(/(<w:r(?:\s[^>]*)?>)/, `$1<w:rPr><w:b/><w:bCs/></w:rPr>`);
+        const boldPart = isNoBold ? "" : "<w:b/><w:bCs/>";
+        runNew = runOrig.replace(/(<w:r(?:\s[^>]*)?>)/, `$1<w:rPr>${boldPart}${CALIBRI_12}</w:rPr>`);
       }
       runNew = runNew.replace(placeholder, safe);
       result = result.substring(0, rStart) + runNew + result.substring(rEndFull);
