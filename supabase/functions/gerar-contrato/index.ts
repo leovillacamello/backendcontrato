@@ -1182,7 +1182,7 @@ serve(async (req) => {
       "«FRACAO_IDEAL»":      fracaoIdeal,
       "«IMOBILIARIA»":       imobStr,
       "«PORCENTAGEMSINAL»":  formatarPercentual(percentual),
-      "«PRECO»":             `${formatar(precoExibido)} (${extenso(precoExibido)})`,
+      "«PRECO»":             `R$${formatar(precoExibido)} (${extenso(precoExibido)})`,
       "«SINAL»":             `R$${formatar(sinalExibido)} (${extenso(sinalExibido)})`,
       "«UNIDADE»":           dados.unidade || "",
       "«VAGAS»":             vagas,
