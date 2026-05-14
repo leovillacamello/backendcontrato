@@ -373,9 +373,14 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
   const origNumId  = numIdMatch ? numIdMatch[1] : null;
 
-  // Extrai <w:rPr> do run original para manter fonte
+  // Extrai <w:rPr> do run original para manter fonte — e garante negrito
   const rPrMatch = paraOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
-  const rPr      = rPrMatch ? rPrMatch[0] : "";
+  const rPrRaw   = rPrMatch ? rPrMatch[0] : "";
+  const rPr      = rPrRaw.includes("<w:b/>")
+    ? rPrRaw
+    : rPrRaw
+      ? rPrRaw.replace("</w:rPr>", "<w:b/><w:bCs/></w:rPr>")
+      : "<w:rPr><w:b/><w:bCs/></w:rPr>";
 
   // Remove parágrafos "fantasma" logo após o placeholder: parágrafos que têm o
   // mesmo numId e contêm apenas "." (resíduo de template com lista numerada).
@@ -846,11 +851,41 @@ function substituir(xml: string, subs: Record<string, string>): string {
   let result = xml;
   for (const [placeholder, valor] of Object.entries(subs)) {
     const safe = escapeXml(valor);
-    // Substituição simples — funciona quando o placeholder está num único run
     let prev = "";
     while (prev !== result) {
-      prev   = result;
-      result = result.replace(placeholder, safe);
+      prev = result;
+      const idx = result.indexOf(placeholder);
+      if (idx === -1) break;
+
+      // Localiza o <w:r> (não <w:rPr>) que contém o placeholder
+      let rStart = -1;
+      let sp = idx;
+      while (sp > 0) {
+        const c = result.lastIndexOf("<w:r", sp);
+        if (c === -1) break;
+        const ch = result[c + 4];
+        if (ch === ">" || ch === " ") { rStart = c; break; }
+        sp = c - 1;
+      }
+
+      if (rStart === -1) { result = result.replace(placeholder, safe); continue; }
+      const rEnd = result.indexOf("</w:r>", idx);
+      if (rEnd === -1) { result = result.replace(placeholder, safe); continue; }
+      const rEndFull = rEnd + "</w:r>".length;
+
+      const runOrig = result.substring(rStart, rEndFull);
+      const rPrM = runOrig.match(/<w:rPr\b[\s\S]*?<\/w:rPr>/);
+      let runNew: string;
+      if (rPrM) {
+        const rPrBold = rPrM[0].includes("<w:b/>")
+          ? rPrM[0]
+          : rPrM[0].replace("</w:rPr>", "<w:b/><w:bCs/></w:rPr>");
+        runNew = runOrig.replace(rPrM[0], rPrBold);
+      } else {
+        runNew = runOrig.replace(/(<w:r(?:\s[^>]*)?>)/, `$1<w:rPr><w:b/><w:bCs/></w:rPr>`);
+      }
+      runNew = runNew.replace(placeholder, safe);
+      result = result.substring(0, rStart) + runNew + result.substring(rEndFull);
     }
   }
   return result;
