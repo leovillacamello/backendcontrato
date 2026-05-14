@@ -148,8 +148,10 @@ interface ContratoRequest {
 interface EmpTemplates {
   template_contrato_destacada?: string | null;
   template_corpo_destacada?: string | null;
+  template_contrato_cabeca_avista?: string | null;
   template_contrato_faturada?: string | null;
   template_corpo_faturada?: string | null;
+  template_contrato_semcomissao_avista?: string | null;
 }
 
 // avista=true quando não há parcelas periódicas (mensal/semestral/anual/financiamento)
@@ -163,7 +165,7 @@ function getTemplates(sigla: string, tipo: string, avista = false, emp?: EmpTemp
   if (tipo === "destacada") {
     return {
       contrato: avista
-        ? `${s} contrato_cabeca_avista.docx`
+        ? emp?.template_contrato_cabeca_avista || `${s} contrato_cabeca_avista.docx`
         : emp?.template_contrato_destacada || `${s} contrato_cabeca.docx`,
       corpo: emp?.template_corpo_destacada || `${s} corpo_cabeca.docx`,
     };
@@ -171,7 +173,7 @@ function getTemplates(sigla: string, tipo: string, avista = false, emp?: EmpTemp
   // sem comissão / faturada
   return {
     contrato: avista
-      ? `${s} contrato_semcomissao_avista.docx`
+      ? emp?.template_contrato_semcomissao_avista || `${s} contrato_semcomissao_avista.docx`
       : emp?.template_contrato_faturada || `${s} contrato_semcomissao.docx`,
     corpo: emp?.template_corpo_faturada || `${s} corpo_semcomissao.docx`,
   };
@@ -1110,7 +1112,7 @@ serve(async (req) => {
     // ─── Validar sigla e buscar configuração de templates
     const { data: empRow, error: empError } = await supabase
       .from("empreendimentos")
-      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_faturada, template_corpo_faturada, taxa_comissao")
+      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_cabeca_avista, template_contrato_faturada, template_corpo_faturada, template_contrato_semcomissao_avista, taxa_comissao")
       .eq("sigla", dados.sigla)
       .single();
     if (empError) {
