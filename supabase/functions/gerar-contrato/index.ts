@@ -212,7 +212,7 @@ function extenso(valor: number): string {
     const res  = inteiro % 1_000;
     const partes: string[] = [];
     if (milh) partes.push(grupo(milh) + (milh === 1 ? " milhão" : " milhões"));
-    if (mil)  partes.push(mil === 1 ? "mil" : grupo(mil) + " mil");
+    if (mil)  partes.push(mil === 1 ? "um mil" : grupo(mil) + " mil");
     if (res)  partes.push(grupo(res));
     r = partes.join(" e ") + (inteiro === 1 ? " real" : " reais");
   }
@@ -320,7 +320,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     let baseDescricao: string, period: string, subsequente: string;
     const demais = qtd === 2 ? "a outra" : "as demais";
     if      (p.tipo === "mensal")      { baseDescricao = "Parcelas Mensais";                 period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
-    else if (p.tipo === "anual")       { baseDescricao = "Parcelas Anuais";                  period = "anuais";     subsequente = "no mesmo dia de doze em doze meses"; }
+    else if (p.tipo === "anual")       { baseDescricao = "Parcelas Anuais";                  period = "anuais";     subsequente = "no mesmo dia dos anos subsequentes"; }
     else if (p.tipo === "semestral")   { baseDescricao = "Parcelas Semestrais";              period = "semestrais"; subsequente = "no mesmo dia de seis em seis meses"; }
     else if (p.tipo === "complemento") { baseDescricao = "Parcelas de Complemento de Sinal"; period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
     else                               { baseDescricao = "Parcelas";                          period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
