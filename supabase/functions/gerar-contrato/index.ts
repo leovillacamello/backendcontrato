@@ -137,6 +137,7 @@ interface ContratoRequest {
   corretores?: Corretor[];
   imobiliarias?: Imobiliaria[];
   parcela_desconto_manual?: string;
+  sem_comissao?: boolean;
 }
 
 // ─── EMPREENDIMENTOS ─────────────────────────────────────────────────────────
@@ -1131,6 +1132,11 @@ serve(async (req) => {
 
     const taxaEmp = ((empRow?.taxa_comissao as number) ?? 4.3) / 100;
     const comissao = definirTipoComissao(preco, sinal, p30, p60, taxaEmp);
+    if (dados.sem_comissao) {
+      comissao.tipo = "faturada";
+      comissao.total_comissao = 0;
+      comissao.parcela_desconto = null;
+    }
     const PARCELAS_VALIDAS = new Set(["ato", "complemento_30", "complemento_60"]);
     if (dados.parcela_desconto_manual) {
       if (!PARCELAS_VALIDAS.has(dados.parcela_desconto_manual))
