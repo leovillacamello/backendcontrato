@@ -1139,9 +1139,8 @@ serve(async (req) => {
       comissao.parcela_desconto = dados.parcela_desconto_manual;
     }
 
-    // ─── Detecta pagamento à vista (sem parcelas periódicas)
-    const TIPOS_PERIODICOS = new Set(["mensal", "semestral", "anual", "financiamento"]);
-    const isAvista = !parcelas.some(p => TIPOS_PERIODICOS.has(p.tipo));
+    // ─── Detecta pagamento à vista (sinal == valor de venda)
+    const isAvista = preco > 0 && sinal >= preco;
 
     // ─── Templates — usa colunas do banco, fallback para convenção de nome
     const tpls = getTemplates(dados.sigla || "", comissao.tipo, isAvista, empRow ?? undefined);
