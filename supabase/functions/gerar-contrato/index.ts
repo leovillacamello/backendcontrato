@@ -255,7 +255,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
   const comps = parcelas.filter(p => p.tipo === "complemento");
   let compEmitido = false;
 
-  // Contar quantas ocorrências de cada tipo haverá no texto (para sufixos romanos)
+  // Contar quantas ocorrências de cada tipo haverá no texto (para sufixos romanos no label)
   const contagem: Record<string, number> = {};
   for (const p of parcelas) {
     if (p.tipo === "ato") continue;
@@ -269,6 +269,8 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     return ` (${ROMANOS[indice[tipo] - 1] ?? indice[tipo]})`;
   };
 
+  let lineNum = 0; // global sequential counter for (i), (ii), (iii)...
+
   for (const p of parcelas) {
     if (p.tipo === "ato") continue;
 
@@ -276,6 +278,8 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     if (p.tipo === "complemento" && temDescontoComp && comps.length >= 2) {
       if (!compEmitido) {
         compEmitido = true;
+        lineNum++;
+        const prefix = `(${romano(lineNum)}) `;
         const comissao = descontoComp!.valor;
         const [val1, val2] = descontoComp!.parcela === "complemento_30"
           ? [Math.max(0, comps[0].valor - comissao), comps[1].valor]
@@ -284,7 +288,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
         const data1 = comps[0].data || "";
         const reaj  = comps[0].reajustavel !== false ? "reajustáveis" : "fixas";
         textos.push(
-          `R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ` +
+          `${prefix}R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ` +
           `mensais, sucessivas, a primeira no valor de R$${formatar(val1)} (${extenso(val1)}) ` +
           `vencendo-se a primeira no dia ${data1} e a outra no valor de R$${formatar(val2)} ` +
           `(${extenso(val2)}) no mesmo dia do mês subsequente ("Parcelas de Complemento de Sinal");`
@@ -293,6 +297,8 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
       continue;
     }
 
+    lineNum++;
+    const prefix = `(${romano(lineNum)}) `;
     const qtd       = p.qtd || 1;
     const total     = p.valor * qtd;
     const valorUnit = formatar(p.valor);
@@ -305,25 +311,26 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
       const label = baseLabel + sufixo(p.tipo);
       const reajUnit = p.reajustavel !== false ? "reajustável" : "fixa";
       textos.push(
-        `R$${valorUnit} (${extenso(p.valor)}) serão pagos em uma única ` +
+        `${prefix}R$${valorUnit} (${extenso(p.valor)}) serão pagos em uma única ` +
         `parcela ${reajUnit} com vencimento em ${data} ("${label}");`
       );
       continue;
     }
 
     let baseDescricao: string, period: string, subsequente: string;
-    if      (p.tipo === "mensal")      { baseDescricao = "Parcelas Mensais";                 period = "mensais";    subsequente = "no mesmo dia dos meses subsequentes"; }
+    const demais = qtd === 2 ? "a outra" : "as demais";
+    if      (p.tipo === "mensal")      { baseDescricao = "Parcelas Mensais";                 period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
     else if (p.tipo === "anual")       { baseDescricao = "Parcelas Anuais";                  period = "anuais";     subsequente = "no mesmo dia de doze em doze meses"; }
     else if (p.tipo === "semestral")   { baseDescricao = "Parcelas Semestrais";              period = "semestrais"; subsequente = "no mesmo dia de seis em seis meses"; }
-    else if (p.tipo === "complemento") { baseDescricao = "Parcelas de Complemento de Sinal"; period = "mensais";    subsequente = "no mesmo dia dos meses subsequentes"; }
-    else                               { baseDescricao = "Parcelas";                          period = "mensais";    subsequente = "no mesmo dia dos meses subsequentes"; }
+    else if (p.tipo === "complemento") { baseDescricao = "Parcelas de Complemento de Sinal"; period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
+    else                               { baseDescricao = "Parcelas";                          period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
 
     const descricao = baseDescricao + sufixo(p.tipo);
 
     textos.push(
-      `R$${valorTot} (${extenso(total)}) serão pagos em ${qtd} parcelas ` +
+      `${prefix}R$${valorTot} (${extenso(total)}) serão pagos em ${qtd} parcelas ` +
       `${reaj}, ${period}, sucessivas, no valor de R$${valorUnit} (${extenso(p.valor)}) ` +
-      `cada uma delas, vencendo-se a primeira no dia ${data} e as demais ${subsequente} ("${descricao}");`
+      `cada uma delas, vencendo-se a primeira no dia ${data} e ${demais} ${subsequente} ("${descricao}");`
     );
   }
   return textos;
