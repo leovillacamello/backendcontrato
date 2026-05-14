@@ -1138,7 +1138,7 @@ serve(async (req) => {
     if (dados.sigla && dados.unidade) {
       let query = supabase
         .from("unidades")
-        .select("fracao_ideal, vagas")
+        .select("fracao_ideal, vaga")
         .eq("sigla", dados.sigla)
         .eq("unidade", dados.unidade);
       if (dados.bloco) query = query.eq("bloco", dados.bloco);
@@ -1146,7 +1146,7 @@ serve(async (req) => {
       if (uErr) console.error("unidades lookup error:", JSON.stringify(uErr));
       if (u) {
         fracaoIdeal = u.fracao_ideal || "";
-        vagas       = String(u.vagas ?? "");
+        vagas       = String(u.vaga ?? "");
       }
     }
 
