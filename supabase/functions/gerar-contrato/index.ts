@@ -151,17 +151,28 @@ interface EmpTemplates {
   template_corpo_faturada?: string | null;
 }
 
-function getTemplates(sigla: string, tipo: string, emp?: EmpTemplates) {
+// avista=true quando não há parcelas periódicas (mensal/semestral/anual/financiamento)
+// Lógica de templates:
+//   destacada + regular   → contrato_cabeca       + corpo_cabeca
+//   destacada + avista    → contrato_cabeca_avista + corpo_cabeca      (só o quadro muda)
+//   semcomissao + regular → contrato_semcomissao   + corpo_semcomissao
+//   semcomissao + avista  → contrato_semcomissao_avista + corpo_semcomissao (só o quadro muda)
+function getTemplates(sigla: string, tipo: string, avista = false, emp?: EmpTemplates) {
   const s = sigla?.toUpperCase();
   if (tipo === "destacada") {
     return {
-      contrato: emp?.template_contrato_destacada || `${s} contrato_cabeca.docx`,
-      corpo:    emp?.template_corpo_destacada    || `${s} corpo_cabeca.docx`,
+      contrato: avista
+        ? `${s} contrato_cabeca_avista.docx`
+        : emp?.template_contrato_destacada || `${s} contrato_cabeca.docx`,
+      corpo: emp?.template_corpo_destacada || `${s} corpo_cabeca.docx`,
     };
   }
+  // sem comissão / faturada
   return {
-    contrato: emp?.template_contrato_faturada || `${s} contrato_faturado.docx`,
-    corpo:    emp?.template_corpo_faturada    || `${s} corpo_faturado.docx`,
+    contrato: avista
+      ? `${s} contrato_semcomissao_avista.docx`
+      : emp?.template_contrato_faturada || `${s} contrato_semcomissao.docx`,
+    corpo: emp?.template_corpo_faturada || `${s} corpo_semcomissao.docx`,
   };
 }
 
@@ -1128,8 +1139,12 @@ serve(async (req) => {
       comissao.parcela_desconto = dados.parcela_desconto_manual;
     }
 
+    // ─── Detecta pagamento à vista (sem parcelas periódicas)
+    const TIPOS_PERIODICOS = new Set(["mensal", "semestral", "anual", "financiamento"]);
+    const isAvista = !parcelas.some(p => TIPOS_PERIODICOS.has(p.tipo));
+
     // ─── Templates — usa colunas do banco, fallback para convenção de nome
-    const tpls = getTemplates(dados.sigla || "", comissao.tipo, empRow ?? undefined);
+    const tpls = getTemplates(dados.sigla || "", comissao.tipo, isAvista, empRow ?? undefined);
 
     // ─── Fração ideal e vagas — sempre do banco, nunca do payload
     let fracaoIdeal = "";
