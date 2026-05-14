@@ -123,10 +123,8 @@ interface ContratoRequest {
   bloco?: string;
   fracao_ideal?: string;
   vagas?: string;
-  parcelas_diretas?: Parcela[];
-  preco_direto?: number;
-  fluxo?: string;
-  valor_venda_manual?: number;
+  parcelas_diretas: Parcela[];
+  preco_direto: number;
   data_assinatura?: string;
   tipo_ass?: string;
   corretores?: Corretor[];
@@ -135,16 +133,29 @@ interface ContratoRequest {
 }
 
 // ─── EMPREENDIMENTOS ─────────────────────────────────────────────────────────
-// Siglas válidas vêm da tabela `empreendimentos` no Supabase.
-// Basta inserir uma linha na tabela e subir os 4 arquivos no Storage:
-// "[SIGLA] contrato_cabeca.docx", "[SIGLA] corpo_cabeca.docx",
-// "[SIGLA] contrato_faturado.docx", "[SIGLA] corpo_faturado.docx"
+// Templates são resolvidos pelas colunas da tabela `empreendimentos`.
+// Fallback para convenção de nome caso as colunas estejam vazias:
+// "[SIGLA] contrato_cabeca.docx", "[SIGLA] corpo_cabeca.docx", etc.
 
-function getTemplates(sigla: string, tipo: string) {
+interface EmpTemplates {
+  template_contrato_destacada?: string | null;
+  template_corpo_destacada?: string | null;
+  template_contrato_faturada?: string | null;
+  template_corpo_faturada?: string | null;
+}
+
+function getTemplates(sigla: string, tipo: string, emp?: EmpTemplates) {
   const s = sigla?.toUpperCase();
-  return tipo === "destacada"
-    ? { contrato: `${s} contrato_cabeca.docx`,  corpo: `${s} corpo_cabeca.docx`  }
-    : { contrato: `${s} contrato_faturado.docx`, corpo: `${s} corpo_faturado.docx` };
+  if (tipo === "destacada") {
+    return {
+      contrato: emp?.template_contrato_destacada || `${s} contrato_cabeca.docx`,
+      corpo:    emp?.template_corpo_destacada    || `${s} corpo_cabeca.docx`,
+    };
+  }
+  return {
+    contrato: emp?.template_contrato_faturada || `${s} contrato_faturado.docx`,
+    corpo:    emp?.template_corpo_faturada    || `${s} corpo_faturado.docx`,
+  };
 }
 
 // ─── FORMATAÇÃO ──────────────────────────────────────────────────────────────
@@ -219,59 +230,6 @@ function definirTipoComissao(preco: number, sinal: number, p30 = 0, p60 = 0) {
   else                               { tipo = "faturada";  parcela_desconto = null; }
 
   return { tipo, total_comissao: comissao, parcela_desconto };
-}
-
-// ─── FLUXO TEXTO LIVRE ───────────────────────────────────────────────────────
-
-function interpretarFluxo(texto: string): { parcelas: Parcela[]; valor_venda: number } {
-  const parcelas: Parcela[] = [];
-  let valor_venda = 0;
-
-  // Suporta separador \n ou |
-  const linhas = (texto || "").split(/\n|\|/).map(l => l.trim()).filter(Boolean);
-
-  for (const l of linhas) {
-    const ll = l.toLowerCase();
-
-    // Detecta valor de venda (aceita "venda:", "valor de venda", "valor venda")
-    if (ll.match(/\bvenda\b/) && !ll.includes("ato") && !ll.includes("mensai") && !ll.includes("semestrai") && !ll.includes("anua")) {
-      const v = l.match(/R\$\s*([\d\.,]+)/) || l.match(/:\s*([\d\.,]+)/);
-      if (v) valor_venda = parseFloat(v[1].replace(/\./g, "").replace(",", "."));
-      continue;
-    }
-
-    // Extrai quantidade: aceita (60), 60x, x60
-    const qtdMatch = l.match(/\((\d+)\)/) || l.match(/\b(\d+)\s*x\b/i) || l.match(/\bx\s*(\d+)\b/i);
-    const qtd = qtdMatch ? parseInt(qtdMatch[1]) : 1;
-
-    // Extrai valor monetário: prefere R$ valor, fallback para : valor
-    const valorMoneyMatch = l.match(/R\$\s*([\d\.,]+)/);
-    const valorColonMatch = l.match(/:\s*([\d\.,]+)/);
-    const valorRaw = valorMoneyMatch
-      ? valorMoneyMatch[1]
-      : (valorColonMatch ? valorColonMatch[1] : null);
-    const valor = valorRaw ? parseFloat(valorRaw.replace(/\./g, "").replace(",", ".")) : 0;
-
-    // Extrai data
-    const dataMatch = l.match(/(\d{2}\/\d{2}\/\d{4})/);
-    const data = dataMatch ? dataMatch[1] : "";
-
-    // Classifica tipo
-    let tipo: string;
-    if      (ll.match(/\bato\b/))                                  tipo = "ato";
-    else if (ll.includes("complemento"))                           tipo = "complemento";
-    else if (ll.match(/\b30d\b|\b60d\b|\b90d\b/))                 tipo = "complemento";
-    else if (ll.includes("mensai"))                                tipo = "mensal";
-    else if (ll.includes("semestrai"))                             tipo = "semestral";
-    else if (ll.includes("anua"))                                  tipo = "anual";
-    else if (ll.includes("financiamento"))                         tipo = "financiamento";
-    else if (ll.includes("única") || ll.includes("unica"))         tipo = "unica";
-    else continue;
-
-    parcelas.push({ tipo, qtd, valor, data, reajustavel: true });
-  }
-
-  return { parcelas, valor_venda };
 }
 
 // ─── PAGAMENTO ───────────────────────────────────────────────────────────────
@@ -976,20 +934,18 @@ function validarEntrada(dados: ContratoRequest): string | null {
   }
 
   // preço
-  const preco = dados.preco_direto ?? dados.valor_venda_manual;
+  const preco = dados.preco_direto;
   if (preco !== undefined) {
     if (typeof preco !== "number" || preco <= 0 || preco > 1e9)
       return "Preço inválido: deve ser número positivo até 1 bilhão";
   }
 
-  // parcelas diretas
-  if (dados.parcelas_diretas) {
-    if (!Array.isArray(dados.parcelas_diretas))
-      return "parcelas_diretas deve ser um array";
-    for (const p of dados.parcelas_diretas) {
-      if (typeof p.valor !== "number" || p.valor < 0)
-        return "Parcela: valor deve ser número não-negativo";
-    }
+  // parcelas diretas — obrigatório
+  if (!Array.isArray(dados.parcelas_diretas) || dados.parcelas_diretas.length === 0)
+    return "Campo obrigatório: parcelas_diretas (array com ao menos 1 parcela)";
+  for (const p of dados.parcelas_diretas) {
+    if (typeof p.valor !== "number" || p.valor < 0)
+      return "Parcela: valor deve ser número não-negativo";
   }
 
   // corretores
@@ -1088,10 +1044,10 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
-    // ─── Validar sigla contra a tabela empreendimentos
+    // ─── Validar sigla e buscar configuração de templates
     const { data: empRow, error: empError } = await supabase
       .from("empreendimentos")
-      .select("sigla")
+      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_faturada, template_corpo_faturada")
       .eq("sigla", dados.sigla)
       .single();
     if (empError) {
@@ -1104,17 +1060,8 @@ serve(async (req) => {
     }
 
     // ─── Parcelas e preço
-    let parcelas: Parcela[];
-    let preco: number;
-
-    if (dados.parcelas_diretas?.length) {
-      parcelas = dados.parcelas_diretas;
-      preco    = dados.preco_direto || 0;
-    } else {
-      const r  = interpretarFluxo(dados.fluxo || "");
-      parcelas = r.parcelas;
-      preco    = dados.valor_venda_manual || r.valor_venda;
-    }
+    const parcelas: Parcela[] = dados.parcelas_diretas;
+    const preco: number = dados.preco_direto || 0;
 
     const sinal = parcelas.find(p => p.tipo === "ato")?.valor || 0;
     const comps = parcelas.filter(p => p.tipo === "complemento");
@@ -1130,8 +1077,8 @@ serve(async (req) => {
       comissao.parcela_desconto = dados.parcela_desconto_manual;
     }
 
-    // ─── Templates
-    const tpls = getTemplates(dados.sigla || "", comissao.tipo);
+    // ─── Templates — usa colunas do banco, fallback para convenção de nome
+    const tpls = getTemplates(dados.sigla || "", comissao.tipo, empRow ?? undefined);
 
     // ─── Fração ideal e vagas — sempre do banco, nunca do payload
     let fracaoIdeal = "";
