@@ -872,12 +872,12 @@ function escapeXml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function stripMergeFieldRuns(xml: string): string {
+function stripMergeFields(xml: string): string {
   if (!xml.includes("MERGEFIELD")) return xml;
-  // Remove runs that contain fldChar (begin/separate/end markers)
-  xml = xml.replace(/<w:r\b[^>]*>\s*(?:<w:rPr\b[\s\S]*?<\/w:rPr>\s*)?<w:fldChar\b[^/]*\/>\s*<\/w:r>/g, "");
-  // Remove runs that contain instrText (the MERGEFIELD code itself)
-  xml = xml.replace(/<w:r\b[^>]*>\s*(?:<w:rPr\b[\s\S]*?<\/w:rPr>\s*)?<w:instrText\b[\s\S]*?<\/w:instrText>\s*<\/w:r>/g, "");
+  // Remove instrText elements (field codes like: MERGEFIELD "FIELDNAME" \* MERGEFORMAT)
+  xml = xml.replace(/<w:instrText\b[^>]*>[\s\S]*?<\/w:instrText>/g, "");
+  // Remove self-closing fldChar elements (begin / separate / end markers)
+  xml = xml.replace(/<w:fldChar\b[^/]*\/>/g, "");
   return xml;
 }
 
@@ -1302,8 +1302,8 @@ serve(async (req) => {
     }
 
     // ─── Strip Word MERGEFIELD field structures (keeps display text, removes field codes)
-    xml1 = stripMergeFieldRuns(xml1);
-    xml2 = stripMergeFieldRuns(xml2);
+    xml1 = stripMergeFields(xml1);
+    xml2 = stripMergeFields(xml2);
 
     // ─── Mesclar e recomprimir
     const xmlFinal = mesclarDocs(xml1, xml2);
