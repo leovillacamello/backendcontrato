@@ -1150,7 +1150,7 @@ serve(async (req) => {
       comissao.parcela_desconto = null;
     }
     const PARCELAS_VALIDAS = new Set(["ato", "complemento_30", "complemento_60"]);
-    if (dados.parcela_desconto_manual) {
+    if (dados.parcela_desconto_manual && !dados.sem_comissao) {
       if (!PARCELAS_VALIDAS.has(dados.parcela_desconto_manual))
         return new Response(JSON.stringify({ error: "parcela_desconto_manual inválida" }), { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } });
       comissao.tipo = "destacada";
