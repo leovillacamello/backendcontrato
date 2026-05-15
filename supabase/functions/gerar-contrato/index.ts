@@ -301,7 +301,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
       if (!compEmitido) {
         compEmitido = true;
         lineNum++;
-        const prefix = `(${romano(lineNum)}) `;
+        const prefix = `(${romano(lineNum)})\t`;
         const comissao = descontoComp!.valor;
         const [val1, val2] = descontoComp!.parcela === "complemento_30"
           ? [Math.max(0, comps[0].valor - comissao), comps[1].valor]
@@ -320,7 +320,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     }
 
     lineNum++;
-    const prefix = `(${romano(lineNum)}) `;
+    const prefix = `(${romano(lineNum)})\t`;
     const qtd       = p.qtd || 1;
     const total     = p.valor * qtd;
     const valorUnit = formatar(p.valor);
@@ -382,9 +382,7 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   // Extrai <w:pPr> para reutilizar em cada novo parágrafo (remove numPr para não duplicar numeração)
   const pPrMatch = paraOrig.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/);
   const pPrRaw   = pPrMatch ? pPrMatch[0] : "";
-  const pPr      = pPrRaw
-    .replace(/<w:numPr\b[\s\S]*?<\/w:numPr>/g, "")
-    .replace(/<w:ind\b[^>]*\/>/g, "");
+  const pPr      = pPrRaw.replace(/<w:numPr\b[\s\S]*?<\/w:numPr>/g, "");
 
   // Extrai o numId do parágrafo original (se houver)
   const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
@@ -450,9 +448,14 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   }
 
   // Gera um parágrafo por linha de pagamento
-  const parasNovos = linhas.map(t =>
-    `<w:p>${pPrComEspaco}<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(t)}</w:t></w:r></w:p>`
-  ).join("");
+  // O prefixo "(i)\t" usa <w:tab/> para criar o recuo pendente (numeral à esq., texto indentado)
+  const parasNovos = linhas.map(t => {
+    const tabIdx = t.indexOf("\t");
+    const runContent = tabIdx !== -1
+      ? `<w:t xml:space="preserve">${escapeXml(t.substring(0, tabIdx))}</w:t><w:tab/><w:t xml:space="preserve">${escapeXml(t.substring(tabIdx + 1))}</w:t>`
+      : `<w:t xml:space="preserve">${escapeXml(t)}</w:t>`;
+    return `<w:p>${pPrComEspaco}<w:r>${rPr}${runContent}</w:r></w:p>`;
+  }).join("");
 
   return xml.substring(0, pStart) + parasNovos + xml.substring(pEnd);
 }
