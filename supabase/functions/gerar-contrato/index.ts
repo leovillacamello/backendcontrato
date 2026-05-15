@@ -151,16 +151,18 @@ interface EmpTemplates {
   template_contrato_cabeca_avista?: string | null;
   template_contrato_faturada?: string | null;
   template_corpo_faturada?: string | null;
+  template_contrato_semcomissao?: string | null;
+  template_corpo_semcomissao?: string | null;
   template_contrato_semcomissao_avista?: string | null;
 }
 
-// avista=true quando não há parcelas periódicas (mensal/semestral/anual/financiamento)
-// Lógica de templates:
-//   destacada + regular   → contrato_cabeca       + corpo_cabeca
-//   destacada + avista    → contrato_cabeca_avista + corpo_cabeca      (só o quadro muda)
-//   semcomissao + regular → contrato_semcomissao   + corpo_semcomissao
-//   semcomissao + avista  → contrato_semcomissao_avista + corpo_semcomissao (só o quadro muda)
-function getTemplates(sigla: string, tipo: string, avista = false, emp?: EmpTemplates) {
+// Lógica de templates (4 casos):
+//   destacada + regular   → contrato_cabeca          + corpo_cabeca
+//   destacada + avista    → contrato_cabeca_avista    + corpo_cabeca
+//   faturada  (imobiliária) → contrato_faturado       + corpo_faturado
+//   semcomissao + regular → contrato_semcomissao      + corpo_semcomissao
+//   semcomissao + avista  → contrato_semcomissao_avista + corpo_semcomissao
+function getTemplates(sigla: string, tipo: string, avista = false, semComissao = false, emp?: EmpTemplates) {
   const s = sigla?.toUpperCase();
   if (tipo === "destacada") {
     return {
@@ -170,12 +172,18 @@ function getTemplates(sigla: string, tipo: string, avista = false, emp?: EmpTemp
       corpo: emp?.template_corpo_destacada || `${s} corpo_cabeca.docx`,
     };
   }
-  // sem comissão / faturada
+  if (semComissao) {
+    return {
+      contrato: avista
+        ? emp?.template_contrato_semcomissao_avista || `${s} contrato_semcomissao_avista.docx`
+        : emp?.template_contrato_semcomissao || `${s} contrato_semcomissao.docx`,
+      corpo: emp?.template_corpo_semcomissao || `${s} corpo_semcomissao.docx`,
+    };
+  }
+  // faturada — comissão paga pela imobiliária
   return {
-    contrato: avista
-      ? emp?.template_contrato_semcomissao_avista || `${s} contrato_semcomissao_avista.docx`
-      : emp?.template_contrato_faturada || `${s} contrato_semcomissao.docx`,
-    corpo: emp?.template_corpo_faturada || `${s} corpo_semcomissao.docx`,
+    contrato: emp?.template_contrato_faturada || `${s} contrato_faturado.docx`,
+    corpo: emp?.template_corpo_faturada || `${s} corpo_faturado.docx`,
   };
 }
 
@@ -1113,7 +1121,7 @@ serve(async (req) => {
     // ─── Validar sigla e buscar configuração de templates
     const { data: empRow, error: empError } = await supabase
       .from("empreendimentos")
-      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_cabeca_avista, template_contrato_faturada, template_corpo_faturada, template_contrato_semcomissao_avista, taxa_comissao")
+      .select("sigla, template_contrato_destacada, template_corpo_destacada, template_contrato_cabeca_avista, template_contrato_faturada, template_corpo_faturada, template_contrato_semcomissao, template_corpo_semcomissao, template_contrato_semcomissao_avista, taxa_comissao")
       .eq("sigla", dados.sigla)
       .single();
     if (empError) {
@@ -1153,7 +1161,7 @@ serve(async (req) => {
     const isAvista = preco > 0 && sinal >= preco;
 
     // ─── Templates — usa colunas do banco, fallback para convenção de nome
-    const tpls = getTemplates(dados.sigla || "", comissao.tipo, isAvista, empRow ?? undefined);
+    const tpls = getTemplates(dados.sigla || "", comissao.tipo, isAvista, !!dados.sem_comissao, empRow ?? undefined);
 
     // ─── Fração ideal e vagas — sempre do banco, nunca do payload
     let fracaoIdeal = "";
