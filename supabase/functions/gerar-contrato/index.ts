@@ -371,9 +371,10 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
 
   const paraOrig = xml.substring(pStart, pEnd);
 
-  // Extrai <w:pPr> para reutilizar em cada novo parágrafo
+  // Extrai <w:pPr> para reutilizar em cada novo parágrafo (remove numPr para não duplicar numeração)
   const pPrMatch = paraOrig.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/);
-  const pPr      = pPrMatch ? pPrMatch[0] : "";
+  const pPrRaw   = pPrMatch ? pPrMatch[0] : "";
+  const pPr      = pPrRaw.replace(/<w:numPr\b[\s\S]*?<\/w:numPr>/g, "");
 
   // Extrai o numId do parágrafo original (se houver)
   const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
