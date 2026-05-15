@@ -382,7 +382,9 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
   // Extrai <w:pPr> para reutilizar em cada novo parágrafo (remove numPr para não duplicar numeração)
   const pPrMatch = paraOrig.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/);
   const pPrRaw   = pPrMatch ? pPrMatch[0] : "";
-  const pPr      = pPrRaw.replace(/<w:numPr\b[\s\S]*?<\/w:numPr>/g, "");
+  const pPr      = pPrRaw
+    .replace(/<w:numPr\b[\s\S]*?<\/w:numPr>/g, "")
+    .replace(/<w:ind\b[^>]*\/>/g, "");
 
   // Extrai o numId do parágrafo original (se houver)
   const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
@@ -870,6 +872,15 @@ function escapeXml(str: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function stripMergeFieldRuns(xml: string): string {
+  if (!xml.includes("MERGEFIELD")) return xml;
+  // Remove runs that contain fldChar (begin/separate/end markers)
+  xml = xml.replace(/<w:r\b[^>]*>\s*(?:<w:rPr\b[\s\S]*?<\/w:rPr>\s*)?<w:fldChar\b[^/]*\/>\s*<\/w:r>/g, "");
+  // Remove runs that contain instrText (the MERGEFIELD code itself)
+  xml = xml.replace(/<w:r\b[^>]*>\s*(?:<w:rPr\b[\s\S]*?<\/w:rPr>\s*)?<w:instrText\b[\s\S]*?<\/w:instrText>\s*<\/w:r>/g, "");
+  return xml;
+}
+
 function substituir(xml: string, subs: Record<string, string>): string {
   let result = xml;
   for (const [placeholder, valor] of Object.entries(subs)) {
@@ -1289,6 +1300,10 @@ serve(async (req) => {
     if (dados.corretores?.length) {
       xml1 = substituirCorretores(xml1, dados.corretores);
     }
+
+    // ─── Strip Word MERGEFIELD field structures (keeps display text, removes field codes)
+    xml1 = stripMergeFieldRuns(xml1);
+    xml2 = stripMergeFieldRuns(xml2);
 
     // ─── Mesclar e recomprimir
     const xmlFinal = mesclarDocs(xml1, xml2);
