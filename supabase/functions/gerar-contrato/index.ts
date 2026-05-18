@@ -93,6 +93,7 @@ interface PFSlot {
   rg?: string;
   orgao_emissor?: string;
   data_emissao?: string;
+  endereco?: string;
   parceiro?: ParceiroSlot;
 }
 
@@ -607,7 +608,7 @@ function qualificarComConjuge(c: Comprador): string {
 
 function qualificarPJ(slot: PJSlot): string {
   const cnpj = slot.cnpj ? `, inscrita no CNPJ/ME sob o nº ${slot.cnpj}` : "";
-  const sede  = slot.endereco_pj ? `, com sede na ${slot.endereco_pj}` : "";
+  const sede  = slot.endereco_pj ? `, com sede à ${slot.endereco_pj}` : "";
   const rep   = slot.representante;
   let repPart = "";
   if (rep?.nome) {
@@ -666,23 +667,52 @@ function qualificarPFComParceiro(slot: PFSlot): string {
 // ─── MONTAR COMPRADORA A PARTIR DE SLOTS ──────────────────────────────────────
 
 function montarCompradoraFromSlots(dados: ContratoRequest): string {
-  const slots   = dados.slots!;
-  const endereco = dados.endereco || "";
+  const slots = dados.slots!;
+
+  // Collect per-PF addresses; PJ addresses are always embedded inline via qualificarPJ
+  const pfAddresses = slots
+    .filter((s) => s.tipo === "PF")
+    .map((s) => ((s as PFSlot).endereco || "").trim());
+  const uniquePfAddrs = [...new Set(pfAddresses.filter(Boolean))];
+
+  // "shared at end" when all PF buyers have the same address (or none specified)
+  const useSharedAtEnd = uniquePfAddrs.length <= 1;
+  const sharedAddr = uniquePfAddrs[0] || (dados.endereco || "").trim();
 
   const parts = slots.map((slot) => {
     if (slot.tipo === "PJ") return qualificarPJ(slot as PJSlot);
+
     const pf = slot as PFSlot;
-    if (pf.parceiro) return qualificarPFComParceiro(pf);
-    return qualificar(pf as unknown as Comprador);
+    const hasPartner = !!pf.parceiro;
+    const pfAddr = (pf.endereco || "").trim();
+
+    const baseText = hasPartner
+      ? qualificarPFComParceiro(pf)
+      : qualificar(pf as unknown as Comprador);
+
+    // In "different addresses" mode: append address inline for each PF slot
+    if (!useSharedAtEnd && pfAddr) {
+      const residente = hasPartner ? "residentes à" : "residente à";
+      return `${baseText}, ${residente} ${pfAddr}`;
+    }
+
+    return baseText;
   });
 
   if (parts.length === 1) {
-    return `${parts[0]}, residente(s) na ${endereco}`;
+    const suffix = sharedAddr ? `, residente(s) na ${sharedAddr}` : "";
+    return `${parts[0]}${suffix}`;
   }
 
   const numbered = parts.map((p, i) => `(${i + 1}) ${p}`);
   const last = numbered.pop()!;
-  return `${numbered.join("; ")}; e ${last}, residentes na ${endereco}`;
+
+  if (useSharedAtEnd && sharedAddr) {
+    return `${numbered.join("; ")}; e ${last}, residentes na ${sharedAddr}`;
+  }
+
+  // Different addresses — each PF already has their address inline
+  return `${numbered.join("; ")}; e ${last}`;
 }
 
 function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
