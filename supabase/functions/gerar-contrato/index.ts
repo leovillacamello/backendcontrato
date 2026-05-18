@@ -694,24 +694,25 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     const hasPartner = !!pf.parceiro;
     const pfAddr = (pf.endereco || "").trim();
 
-    const docTipo = (pf as any).doc_tipo || "";
-    let docOverrideText = "";
+    const docTipo = pf.doc_tipo || "";
+    const ins = (pf.sexo || "M") === "F" ? "inscrita" : "inscrito";
+    let docText = "";
     if (docTipo === "OAB" && pf.rg) {
-      const ins = (pf.sexo || "M") === "F" ? "inscrita" : "inscrito";
-      docOverrideText = `, ${ins} na ${pf.orgao_emissor || "OAB"} sob o nº ${pf.rg}`;
+      docText = `, ${ins} na ${pf.orgao_emissor || "OAB"} sob o nº ${pf.rg}`;
     } else if (docTipo === "CRM" && pf.rg) {
-      const ins = (pf.sexo || "M") === "F" ? "inscrita" : "inscrito";
-      docOverrideText = `, ${ins} no ${pf.orgao_emissor || "CRM"} sob o nº ${pf.rg}`;
+      docText = `, ${ins} no ${pf.orgao_emissor || "CRM"} sob o nº ${pf.rg}`;
+    } else if (!docTipo && pf.oab?.numero) {
+      docText = `, ${ins} na OAB/${pf.oab.seccional || ""} sob o nº ${pf.oab.numero}`;
     }
 
-    // For OAB/CRM, suppress the default "portador da identidade" text by clearing rg before qualification
+    // For OAB/CRM: suppress "portador da identidade" — number already in docText
     const pfForQualify = (docTipo === "OAB" || docTipo === "CRM")
-      ? { ...pf, rg: undefined, orgao_emissor: undefined, data_emissao: undefined } as PFSlot
+      ? { ...pf, rg: undefined, orgao_emissor: undefined, data_emissao: undefined } as unknown as PFSlot
       : pf;
 
     const baseText = (hasPartner
       ? qualificarPFComParceiro(pfForQualify)
-      : qualificar(pfForQualify as unknown as Comprador)) + docOverrideText;
+      : qualificar(pfForQualify as unknown as Comprador)) + docText;
 
     // In "different addresses" mode: append address inline for each PF slot
     if (!useSharedAtEnd && pfAddr) {
