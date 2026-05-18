@@ -653,23 +653,47 @@ function qualificarPFComParceiro(slot: PFSlot): string {
     return qualificarComConjuge({ ...c, conjuge });
   }
 
-  // União estável
-  const pSexo = (parc.sexo || "F") === "F" ? "F" : "M";
-  const conjLabel   = pSexo === "F" ? "sua companheira" : "seu companheiro";
-  const regime      = parc.regime || "";
-  const regimePart  = regime ? ` com ${regime.toLowerCase()}` : "";
-  const dataEsc     = parc.data_escritura ? ` assinada em ${isoBR(parc.data_escritura)}` : "";
-  const cpfPart     = `inscritos no CPF/ME sob os nºs ${slot.cpf} e ${parc.cpf}`;
+  // União estável — 3 variações conforme regime e data de escritura
+  const pSexo   = (parc.sexo || "F") === "F" ? "F" : "M";
+  const regime  = (parc.regime || "").trim();
+  const dataEsc = (parc.data_escritura || "").trim();
+
+  const cpfPart = `inscritos no CPF/ME sob os nºs ${slot.cpf} e ${parc.cpf}`;
   const rg1 = rgStr(c), rg2 = rgStr(parc as any);
   let rgPart = "";
   if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
   else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
   else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
 
+  if (dataEsc) {
+    // Caso C: com data de escritura — formato (1)/(2), qualificação completa individual
+    const p2: Comprador = {
+      nome: parc.nome, cpf: parc.cpf, sexo: parc.sexo,
+      nacionalidade: parc.nacionalidade, profissao: parc.profissao,
+      rg: parc.rg, orgao_emissor: parc.orgao_emissor, data_emissao: parc.data_emissao,
+    };
+    return (
+      `(1) ${qualificar(c)}; e (2) ${qualificar(p2)}, ` +
+      `que declaram em ${dataExtenso(dataEsc)} através de Escritura de União Estável ` +
+      `viver sob o regime de ${regime.toLowerCase() || "comunhão parcial de bens"}`
+    );
+  }
+
+  if (regime) {
+    // Caso B: com regime mas sem data — "e sua mulher/marido ... conviventes em união estável pelo regime da X"
+    const conjLabel = pSexo === "F" ? "sua mulher" : "seu marido";
+    return (
+      `${qualificarSimples(c)}, e ${conjLabel} ${qualificarSimples(parc as any)}, ` +
+      `conviventes em união estável pelo regime da ${regime.toLowerCase()}, ` +
+      `${cpfPart}${rgPart}`
+    );
+  }
+
+  // Caso A: sem regime e sem data — "e NOME, conviventes em união estável"
   return (
-    `${qualificarSimples(c)}, e ${conjLabel} ${qualificarSimples(parc as any)}, ` +
-    `${cpfPart}${rgPart}, ` +
-    `que declaram viver em união estável${regimePart} através de escritura pública declaratória${dataEsc}`
+    `${qualificarSimples(c)}, e ${qualificarSimples(parc as any)}, ` +
+    `conviventes em união estável, ` +
+    `${cpfPart}${rgPart}`
   );
 }
 
