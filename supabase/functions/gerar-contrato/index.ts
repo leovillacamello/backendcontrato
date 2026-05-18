@@ -698,9 +698,11 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     const ins = (pf.sexo || "M") === "F" ? "inscrita" : "inscrito";
     let docText = "";
     if (docTipo === "OAB" && pf.rg) {
-      docText = `, ${ins} na ${pf.orgao_emissor || "OAB"} sob o nº ${pf.rg}`;
+      const sec = (pf.orgao_emissor || "").replace(/^OAB\//i, "");
+      docText = `, ${ins} na OAB${sec ? `/${sec}` : ""} sob o nº ${pf.rg}`;
     } else if (docTipo === "CRM" && pf.rg) {
-      docText = `, ${ins} no ${pf.orgao_emissor || "CRM"} sob o nº ${pf.rg}`;
+      const sec = (pf.orgao_emissor || "").replace(/^CRM\//i, "");
+      docText = `, ${ins} no CRM${sec ? `/${sec}` : ""} sob o nº ${pf.rg}`;
     } else if (!docTipo && pf.oab?.numero) {
       docText = `, ${ins} na OAB/${pf.oab.seccional || ""} sob o nº ${pf.oab.numero}`;
     }
