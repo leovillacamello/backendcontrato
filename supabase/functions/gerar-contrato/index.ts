@@ -143,6 +143,7 @@ interface ContratoRequest {
   preco_direto: number;
   data_assinatura?: string;
   tipo_ass?: string;
+  vias_fisicas?: number;
   corretores?: Corretor[];
   imobiliarias?: Imobiliaria[];
   parcela_desconto_manual?: string;
@@ -1285,9 +1286,11 @@ serve(async (req) => {
     // ─── Comunicação — tratada por substituirComunicacao() após substituir()
 
     // ─── Assinatura
+    const VIAS_EXT: Record<number, string> = { 2: "duas", 3: "três", 4: "quatro", 5: "cinco", 6: "seis" };
+    const vias = dados.vias_fisicas || 2;
     const tipoAssStr = dados.tipo_ass === "digital"
       ? "meio digital"
-      : "2 (duas) vias físicas de igual forma e teor";
+      : `${vias} (${VIAS_EXT[vias] ?? "duas"}) vias físicas de igual forma e teor`;
     const slotName = (s?: Slot) => !s ? "" : s.tipo === "PJ" ? s.razao_social : (s as PFSlot).nome || "";
     const ass1 = dados.slots?.length ? slotName(dados.slots[0]) : (dados.compradores[0]?.nome || "");
     const ass2 = dados.slots?.length ? slotName(dados.slots[1]) : (dados.compradores[1]?.nome || "");
