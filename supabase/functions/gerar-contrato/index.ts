@@ -1485,9 +1485,10 @@ serve(async (req) => {
     const year = new Date().getFullYear();
     const ts   = Date.now();
     const storagePath = `${dados.sigla}/${year}/${dados.unidade}-${ts}.docx`;
+    // Bucket "contratos" é criado pela migration migration_storage.sql — não tentar
+    // criar a cada request (gera log spam e round-trip desperdiçada).
     let savedPath = "";
     try {
-      await supabase.storage.createBucket("contratos", { public: false }).catch(() => {});
       const { error: upErr } = await supabase.storage
         .from("contratos")
         .upload(storagePath, docxBytes, {
