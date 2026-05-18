@@ -82,6 +82,12 @@ interface ParceiroSlot {
   data_escritura?: string;
 }
 
+interface OABSlot {
+  numero: string;
+  seccional?: string;
+  data_emissao?: string;
+}
+
 interface PFSlot {
   tipo: "PF";
   nome: string;
@@ -94,6 +100,7 @@ interface PFSlot {
   orgao_emissor?: string;
   data_emissao?: string;
   endereco?: string;
+  oab?: OABSlot;
   parceiro?: ParceiroSlot;
 }
 
@@ -686,9 +693,14 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     const hasPartner = !!pf.parceiro;
     const pfAddr = (pf.endereco || "").trim();
 
-    const baseText = hasPartner
+    const oab = pf.oab;
+    const oabText = oab?.numero
+      ? `, inscrito${(pf.sexo || "M") === "F" ? "a" : ""} na OAB/${oab.seccional || ""} sob o nº ${oab.numero}`
+      : "";
+
+    const baseText = (hasPartner
       ? qualificarPFComParceiro(pf)
-      : qualificar(pf as unknown as Comprador);
+      : qualificar(pf as unknown as Comprador)) + oabText;
 
     // In "different addresses" mode: append address inline for each PF slot
     if (!useSharedAtEnd && pfAddr) {
