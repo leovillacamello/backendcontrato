@@ -101,6 +101,7 @@ interface PFSlot {
   data_emissao?: string;
   endereco?: string;
   oab?: OABSlot;
+  doc_tipo?: string;
   parceiro?: ParceiroSlot;
 }
 
@@ -693,14 +694,24 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     const hasPartner = !!pf.parceiro;
     const pfAddr = (pf.endereco || "").trim();
 
-    const oab = pf.oab;
-    const oabText = oab?.numero
-      ? `, inscrito${(pf.sexo || "M") === "F" ? "a" : ""} na OAB/${oab.seccional || ""} sob o nº ${oab.numero}`
-      : "";
+    const docTipo = (pf as any).doc_tipo || "";
+    let docOverrideText = "";
+    if (docTipo === "OAB" && pf.rg) {
+      const ins = (pf.sexo || "M") === "F" ? "inscrita" : "inscrito";
+      docOverrideText = `, ${ins} na ${pf.orgao_emissor || "OAB"} sob o nº ${pf.rg}`;
+    } else if (docTipo === "CRM" && pf.rg) {
+      const ins = (pf.sexo || "M") === "F" ? "inscrita" : "inscrito";
+      docOverrideText = `, ${ins} no ${pf.orgao_emissor || "CRM"} sob o nº ${pf.rg}`;
+    }
+
+    // For OAB/CRM, suppress the default "portador da identidade" text by clearing rg before qualification
+    const pfForQualify = (docTipo === "OAB" || docTipo === "CRM")
+      ? { ...pf, rg: undefined, orgao_emissor: undefined, data_emissao: undefined } as PFSlot
+      : pf;
 
     const baseText = (hasPartner
-      ? qualificarPFComParceiro(pf)
-      : qualificar(pf as unknown as Comprador)) + oabText;
+      ? qualificarPFComParceiro(pfForQualify)
+      : qualificar(pfForQualify as unknown as Comprador)) + docOverrideText;
 
     // In "different addresses" mode: append address inline for each PF slot
     if (!useSharedAtEnd && pfAddr) {
