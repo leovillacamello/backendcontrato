@@ -1004,11 +1004,11 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
     `$1<w:rPr>${CALIBRI_12}</w:rPr>$2`
   );
 
-  // Gera uma linha por corretor (sem limite fixo)
+  // Gera uma linha por corretor (sem limite fixo). Nome em CAPS na tabela.
   const linhas = corretores.map(c =>
     rowNorm
-      .replaceAll("«CORRETOR_EMPRESA»",   escapeXml(c.nome      || ""))
-      .replaceAll("«CORRETOR__EMPRESA»",  escapeXml(c.nome      || ""))
+      .replaceAll("«CORRETOR_EMPRESA»",   escapeXml((c.nome || "").toUpperCase()))
+      .replaceAll("«CORRETOR__EMPRESA»",  escapeXml((c.nome || "").toUpperCase()))
       .replaceAll("«CORRETOR_CRECI»",    escapeXml(c.creci     || ""))
       .replaceAll("«CORRETOR_CPFCNPJ»",  escapeXml(c.cpf_cnpj  || ""))
       .replaceAll("«CORRETOR_VALOR»",    c.valor != null ? formatar(c.valor) : "")
@@ -1470,9 +1470,10 @@ serve(async (req) => {
       "«UNIDADE»":           dados.unidade || "",
       "«VAGAS»":             vagas,
       "«VLR_COMISSAO»":      `R$${formatar(totalComissao)} (${extenso(totalComissao)})`,
-      // AAZ/SMK/DMS: total sem centavos (template já tem R$ e ,00 hardcoded)
-      "«TOTAL_COMISSAO»":    formatar(totalComissao).replace(/,\d{2}$/, ""),
-      "«TOTAL_COMISSÃO»":    formatar(totalComissao).replace(/,\d{2}$/, ""),
+      // TOTAL_COMISSAO: mantém ,00 no valor. Se o template tinha ",00" hardcoded depois,
+      // a função substituirCorretores remove o run ",00" duplicado em seguida.
+      "«TOTAL_COMISSAO»":    formatar(totalComissao),
+      "«TOTAL_COMISSÃO»":    formatar(totalComissao),
     });
     // Template faturado tem "qual seja, " hardcoded antes de «IMOBILIARIA» (runs separados).
     // Remove "qual seja, " que sobrou no nó de texto após a substituição do placeholder.
