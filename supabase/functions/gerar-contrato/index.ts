@@ -1007,13 +1007,14 @@ function boldifyCorretorHeader(xml: string): string {
   if (idx === -1) return xml;
   const modelTrStart = xml.lastIndexOf("<w:tr", idx);
   if (modelTrStart === -1) return xml;
-  // Localiza tr anterior (cabeçalho)
+  // Localiza tr anterior (cabeçalho). "<w:tr" tem 5 chars, então o próximo char
+  // está no índice +5 (deve ser ">" ou " " — descarta "<w:trPr").
   let headerStart = -1;
   let pos = modelTrStart - 1;
   while (pos > 0) {
     const candidate = xml.lastIndexOf("<w:tr", pos);
     if (candidate === -1) break;
-    const ch = xml[candidate + 4];
+    const ch = xml[candidate + 5];
     if (ch === ">" || ch === " ") { headerStart = candidate; break; }
     pos = candidate - 1;
   }
