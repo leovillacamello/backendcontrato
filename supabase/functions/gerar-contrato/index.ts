@@ -575,13 +575,12 @@ function qualificar(c: Comprador, estadoCivilAntes = false): string {
   const midParts = estadoCivilAntes
     ? [estado, prof].filter(Boolean)
     : [prof, estado].filter(Boolean);
-  const rgPart = c.rg
-    ? `, ${portador} da identidade nº ${c.rg}${c.orgao_emissor ? ` do ${c.orgao_emissor}` : ""}${c.data_emissao ? ` em ${isoBR(c.data_emissao)}` : ""}`
+  const cpfStr = `${inscrito} no CPF sob o nº ${c.cpf}`;
+  const rgStr_ = c.rg
+    ? `${portador} da identidade nº ${c.rg}${c.orgao_emissor ? ` do ${c.orgao_emissor}` : ""}${c.data_emissao ? ` em ${isoBR(c.data_emissao)}` : ""}`
     : "";
-  return (
-    `${c.nome}, ${nac}, ${midParts.join(", ")}, ` +
-    `${inscrito} no CPF/ME sob o nº ${c.cpf}${rgPart}`
-  );
+  const idParts = [rgStr_, cpfStr].filter(Boolean).join(", ");
+  return `${c.nome}, ${nac}, ${midParts.join(", ")}, ${idParts}`;
 }
 
 function qualificarSimples(c: { nome: string; nacionalidade?: string; profissao?: string }): string {
@@ -603,16 +602,16 @@ function qualificarComConjuge(c: Comprador): string {
   const conj = c.conjuge!;
   const conjLabel = (conj.sexo || "F") === "F" ? "sua mulher" : "seu marido";
   const regime = conj.regime_bens || "";
-  const cpfPart = `inscritos no CPF/ME sob os nºs ${c.cpf} e ${conj.cpf}`;
+  const cpfPart = `inscritos no CPF sob os nºs ${c.cpf} e ${conj.cpf}`;
   const rg1 = rgStr(c), rg2 = rgStr(conj);
   let rgPart = "";
-  if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
-  else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
-  else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
+  if (rg1 && rg2) rgPart = `portadores das identidades nºs ${rg1} e ${rg2}`;
+  else if (rg1)   rgPart = `portador(a) da identidade nº ${rg1}`;
+  else if (rg2)   rgPart = `portador(a) da identidade nº ${rg2}`;
+  const idParts = [rgPart, cpfPart].filter(Boolean).join(", ");
   return (
     `${qualificarSimples(c)}, e ${conjLabel} ${qualificarSimples(conj)}, ` +
-    `casados pelo regime da ${regime.toLowerCase()}, ` +
-    `${cpfPart}${rgPart}`
+    `casados pelo regime da ${regime.toLowerCase()}, ${idParts}`
   );
 }
 
@@ -633,7 +632,7 @@ function qualificarPJ(slot: PJSlot): string {
     const rg   = rep.rg
       ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
       : "";
-    const cpfR = rep.cpf ? `, ${ins} no CPF/ME sob o nº ${rep.cpf}` : "";
+    const cpfR = rep.cpf ? `, ${ins} no CPF sob o nº ${rep.cpf}` : "";
     repPart = `, neste ato representada por ${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
   }
   return `${slot.razao_social}${cnpj}${sede}${repPart}`;
@@ -723,7 +722,7 @@ function qualificarUniaoEstavelMultiSlot(c: Comprador, p2: Comprador, regime: st
     rgPart = `, portador da identidade nº ${rg2}${o2 ? " do " + o2 : ""}${d2 ? " em " + isoBR(d2) : ""}`;
   }
 
-  const cpfPart = `, inscritos no CPF/ME sob os nºs ${c.cpf} e ${p2.cpf}`;
+  const cpfPart = `, inscritos no CPF sob os nºs ${c.cpf} e ${p2.cpf}`;
 
   return header + middle + rgPart + cpfPart;
 }
@@ -837,7 +836,12 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
   });
 
   if (parts.length === 1) {
-    const suffix = sharedAddr ? `, residente(s) na ${sharedAddr}` : "";
+    if (slots[0].tipo === "PJ") {
+      return parts[0]; // PJ tem sede embutida via qualificarPJ — não precisa "residente"
+    }
+    const pf0 = slots[0] as PFSlot;
+    const residente = pf0.parceiro ? "residentes à" : "residente à";
+    const suffix = sharedAddr ? `, ${residente} ${sharedAddr}` : "";
     return `${parts[0]}${suffix}`;
   }
 
@@ -845,7 +849,7 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
   const last = numbered.pop()!;
 
   if (useSharedAtEnd && sharedAddr) {
-    return `${numbered.join("; ")}; e ${last}, residentes na ${sharedAddr}`;
+    return `${numbered.join("; ")}; e ${last}, residentes à ${sharedAddr}`;
   }
 
   // Different addresses — each PF already has their address inline
@@ -878,7 +882,7 @@ function montarCompradora(dados: ContratoRequest): string {
   const fmt = (c: Comprador) => c.conjuge?.nome ? qualificarComConjuge(c) : qualificar(c);
 
   if (compradores.length === 1) {
-    return `${fmt(compradores[0])}, residente(s) na ${endereco}`;
+    return `${fmt(compradores[0])}, residente à ${endereco}`;
   }
 
   const [c1, c2] = compradores;
@@ -886,17 +890,17 @@ function montarCompradora(dados: ContratoRequest): string {
   // Fluxo legado: dois compradores são o casal (sem conjuge sub-objeto)
   if (relacao === "casado" && !c1.conjuge) {
     const conj = (c2.sexo || "F") === "F" ? "sua mulher" : "seu marido";
-    const cpfPart = `inscritos no CPF/ME sob os nºs ${c1.cpf} e ${c2.cpf}`;
+    const cpfPart = `inscritos no CPF sob os nºs ${c1.cpf} e ${c2.cpf}`;
     const rg1 = rgStr(c1), rg2 = rgStr(c2);
     let rgPart = "";
-    if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
-    else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
-    else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
+    if (rg1 && rg2) rgPart = `portadores das identidades nºs ${rg1} e ${rg2}`;
+    else if (rg1)   rgPart = `portador(a) da identidade nº ${rg1}`;
+    else if (rg2)   rgPart = `portador(a) da identidade nº ${rg2}`;
+    const idParts = [rgPart, cpfPart].filter(Boolean).join(", ");
     return (
       `${qualificarSimples(c1)}, e ${conj} ${qualificarSimples(c2)}, ` +
-      `casados pelo regime da ${regime.toLowerCase()}, ` +
-      `${cpfPart}${rgPart}, ` +
-      `residente(s) na ${endereco}`
+      `casados pelo regime da ${regime.toLowerCase()}, ${idParts}, ` +
+      `residentes à ${endereco}`
     );
   }
 
@@ -904,14 +908,14 @@ function montarCompradora(dados: ContratoRequest): string {
     const regimePart    = regime ? ` com ${regime.toLowerCase()}` : "";
     const dataEscritura = dados.data_escritura ? ` assinada em ${isoBR(dados.data_escritura)}` : "";
     return (
-      `(1) ${qualificar(c1, true)}; e (2) ${qualificar(c2, true)}, residentes na ${endereco}, ` +
+      `(1) ${qualificar(c1, true)}; e (2) ${qualificar(c2, true)}, residentes à ${endereco}, ` +
       `ambos declaram viver em união estável${regimePart} através de escritura pública declaratória${dataEscritura}, ` +
       `independentemente de gênero e número, sendo ambos solidariamente responsáveis e representantes entre si`
     );
   }
 
   // Dois compradores independentes, cada um possivelmente com cônjuge
-  return `(1) ${fmt(c1)}; e (2) ${fmt(c2)}, residentes na ${endereco}`;
+  return `(1) ${fmt(c1)}; e (2) ${fmt(c2)}, residentes à ${endereco}`;
 }
 
 // ─── DOCX: SUBSTITUIÇÃO E MERGE ──────────────────────────────────────────────
