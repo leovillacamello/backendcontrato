@@ -24,10 +24,11 @@ const ORIGENS_PERMITIDAS = new Set([
 const STORAGE_BATCH_SIZE = 100;
 
 serve(async (req) => {
+  // CORS strict: sem fallback "*" quando Origin está ausente — fecha vetor de
+  // chamada via curl/proxy sem header (defesa em profundidade junto com o JWT).
   const origin = req.headers.get("origin") || "";
-  const allowedOrigin = ORIGENS_PERMITIDAS.has(origin) ? origin : (origin ? null : "*");
-
-  if (allowedOrigin === null) {
+  const allowedOrigin = ORIGENS_PERMITIDAS.has(origin) ? origin : null;
+  if (!allowedOrigin) {
     return new Response("Forbidden", { status: 403 });
   }
 

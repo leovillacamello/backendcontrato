@@ -1461,10 +1461,13 @@ const ORIGENS_PERMITIDAS = new Set([
 ]);
 
 serve(async (req) => {
+  // CORS strict: sem fallback "*" quando Origin está ausente. Hoje, o único
+  // caso legítimo sem Origin seria server-to-server, que não precisa de CORS
+  // mesmo. Tirar o * fecha a porta pra atacante que faça request via curl/proxy
+  // sem o header (importante mesmo com JWT obrigatório — defesa em profundidade).
   const origin = req.headers.get("origin") || "";
-  const allowedOrigin = ORIGENS_PERMITIDAS.has(origin) ? origin : (origin ? null : "*");
-
-  if (allowedOrigin === null) {
+  const allowedOrigin = ORIGENS_PERMITIDAS.has(origin) ? origin : null;
+  if (!allowedOrigin) {
     return new Response("Forbidden", { status: 403 });
   }
 
