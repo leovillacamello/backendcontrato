@@ -368,6 +368,23 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
       continue;
     }
 
+    // Caso singular: qtd === 1 para mensal/anual/semestral/complemento — texto sem "sucessivas/cada uma/as demais"
+    if (qtd === 1) {
+      const reajUnit = p.reajustavel !== false ? "reajustável" : "fixa";
+      let periodSing: string;
+      let baseDescSing: string;
+      if (p.tipo === "anual")           { periodSing = "anual";     baseDescSing = "Parcelas Anuais"; }
+      else if (p.tipo === "semestral")  { periodSing = "semestral"; baseDescSing = "Parcelas Semestrais"; }
+      else if (p.tipo === "complemento"){ periodSing = "mensal";    baseDescSing = "Parcelas de Complemento de Sinal"; }
+      else                              { periodSing = "mensal";    baseDescSing = "Parcelas Mensais"; }
+      const descSing = baseDescSing + sufixo(p.tipo);
+      textos.push(
+        `${prefix}R$${valorTot} (${extenso(total)}) serão pagos em 1 parcela ${reajUnit}, ` +
+        `${periodSing}, no valor de R$${valorUnit} (${extenso(p.valor)}) com vencimento em ${data} ("${descSing}");`
+      );
+      continue;
+    }
+
     let baseDescricao: string, period: string, subsequente: string;
     const demais = qtd === 2 ? "a outra" : "as demais";
     if      (p.tipo === "mensal")      { baseDescricao = "Parcelas Mensais";                 period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
@@ -831,8 +848,13 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     .map((s) => ((s as PFSlot).endereco || "").trim());
   const uniquePfAddrs = [...new Set(pfAddresses.filter(Boolean))];
 
-  // "shared at end" when all PF buyers have the same address (or none specified)
-  const useSharedAtEnd = uniquePfAddrs.length <= 1;
+  // "shared at end" só faz sentido pra single-slot OU quando TODOS os PFs têm exatamente
+  // o mesmo endereço (e existe pelo menos um). Em multi-slot misto (alguns sem endereço,
+  // ou com endereços diferentes, ou misturado com PJ), cada PF carrega seu endereço inline.
+  const isMultiSlot = slots.length > 1;
+  const allPfsHaveSameAddr = uniquePfAddrs.length === 1
+    && pfAddresses.every((a) => !!a);
+  const useSharedAtEnd = !isMultiSlot || allPfsHaveSameAddr;
   const sharedAddr = uniquePfAddrs[0] || (dados.endereco || "").trim();
 
   const parts = slots.map((slot) => {
