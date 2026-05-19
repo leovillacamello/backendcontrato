@@ -20,6 +20,11 @@ REVOKE REFERENCES ON public.empreendimentos FROM authenticated;
 REVOKE TRIGGER    ON public.empreendimentos FROM anon;
 REVOKE TRIGGER    ON public.empreendimentos FROM authenticated;
 
+-- Quick win: DELETE em empreendimentos só via Edge Function admin-delete-empreendimento.
+-- Antes: qualquer usuário logado podia apagar todos os empreendimentos via DevTools.
+-- INSERT/UPDATE ficam (UI admin ainda usa direto) — refatorar depois pra Edge Functions.
+REVOKE DELETE     ON public.empreendimentos FROM authenticated;
+
 REVOKE TRUNCATE   ON public.unidades FROM anon;
 REVOKE TRUNCATE   ON public.unidades FROM authenticated;
 REVOKE DELETE     ON public.unidades FROM authenticated;
