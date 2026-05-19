@@ -491,6 +491,26 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
     } else {
       pPrComEspaco = pPr.replace("</w:pPr>", '<w:spacing w:after="160"/></w:pPr>');
     }
+    // Ajusta hanging indent pra caber romanos longos como (vii)/(viii)/(xviii).
+    // 720 twentieths = ~12.7mm — espaço suficiente pra qualquer romano até (xx).
+    if (pPrComEspaco.includes("<w:ind")) {
+      // Atualiza w:hanging existente; se nao tem, adiciona
+      pPrComEspaco = pPrComEspaco.replace(/<w:ind\b([^/]*?)\/>/, (m, attrs) => {
+        let a = attrs;
+        if (/w:hanging="/.test(a)) {
+          a = a.replace(/w:hanging="\d+"/, 'w:hanging="720"');
+        } else {
+          a += ' w:hanging="720"';
+        }
+        if (!/w:left="/.test(a)) {
+          a += ' w:left="720"';
+        }
+        return `<w:ind${a}/>`;
+      });
+    } else {
+      pPrComEspaco = pPrComEspaco.replace("</w:pPr>",
+        '<w:ind w:left="720" w:hanging="720"/></w:pPr>');
+    }
   }
 
   // Gera um parágrafo por linha de pagamento
