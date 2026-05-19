@@ -595,14 +595,40 @@ function formatarTelefone(tel: string): string {
   return tel;
 }
 
+// Valida que dateStr representa uma data real (não "31/02", "2026-13-01" etc).
+// Aceita "" (campo opcional vazio). Retorna { d, m, y } parsed ou null.
+function parseDateParts(dateStr: string | undefined | null): { d: number; m: number; y: number } | null {
+  if (!dateStr) return null;
+  let d: number, m: number, y: number;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    const [ys, ms, ds] = dateStr.split("-");
+    y = parseInt(ys, 10); m = parseInt(ms, 10); d = parseInt(ds, 10);
+  } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+    const [ds, ms, ys] = dateStr.split("/");
+    y = parseInt(ys, 10); m = parseInt(ms, 10); d = parseInt(ds, 10);
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > 2200) return null;
+  // Construção real: rejeita 31/02, 30/02, 31/04 etc.
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return { d, m, y };
+}
+
+function isValidDateInput(dateStr: string | undefined | null): boolean {
+  if (!dateStr) return true; // vazio é ok (campo opcional)
+  return parseDateParts(dateStr) !== null;
+}
+
 function isoBR(dateStr: string): string {
   if (!dateStr || dateStr.length !== 10) return dateStr;
   // Já em formato BR (DD/MM/YYYY) — retorna como está
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
-  try {
-    const [y, m, d] = dateStr.split("-");
-    return `${d}/${m}/${y}`;
-  } catch { return dateStr; }
+  const parts = parseDateParts(dateStr);
+  if (!parts) return ""; // data inválida → string vazia (validação prévia deve impedir chegar aqui)
+  return `${String(parts.d).padStart(2, "0")}/${String(parts.m).padStart(2, "0")}/${parts.y}`;
 }
 
 // Aplica concordância de gênero ao estado civil ("solteiro" → "solteira" se F).
@@ -623,15 +649,12 @@ const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","ag
 
 function dataExtenso(dateStr: string): string {
   if (!dateStr) return "";
-  // Accepts "DD/MM/YYYY" or "YYYY-MM-DD"
-  let d: string, m: string, y: string;
-  if (dateStr.includes("-")) {
-    [y, m, d] = dateStr.split("-");
-  } else {
-    [d, m, y] = dateStr.split("/");
-  }
-  const mes = MESES[parseInt(m, 10) - 1] || m;
-  return `${parseInt(d, 10)} de ${mes} de ${y}`;
+  // Data inválida → string vazia em vez de "31 de fevereiro de 2026" ou
+  // "1 de 13 de 2026" no contrato. Validação prévia em validarEntrada
+  // deve impedir chegar aqui com lixo.
+  const parts = parseDateParts(dateStr);
+  if (!parts) return "";
+  return `${parts.d} de ${MESES[parts.m - 1]} de ${parts.y}`;
 }
 
 // ─── COMPRADORA ──────────────────────────────────────────────────────────────
@@ -1208,7 +1231,8 @@ function escapeXml(str: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // Remove negrito de todos os runs do parágrafo que contém o placeholder.
@@ -1296,7 +1320,10 @@ function substituir(xml: string, subs: Record<string, string>): string {
         const boldPart = isNoBold ? "" : "<w:b/><w:bCs/>";
         runNew = runOrig.replace(/(<w:r(?:\s[^>]*)?>)/, `$1<w:rPr>${boldPart}${CALIBRI_12}</w:rPr>`);
       }
-      runNew = runNew.replace(placeholder, safe);
+      // Callback form: evita que `$1`, `$&`, etc. em `safe` (nomes/empresas que
+      // contenham `$`) sejam interpretados como referência de captura e
+      // corrompam o texto do contrato.
+      runNew = runNew.replace(placeholder, () => safe);
       result = result.substring(0, rStart) + runNew + result.substring(rEndFull);
     }
   }
@@ -1400,7 +1427,15 @@ function validarEntrada(dados: ContratoRequest): string | null {
   for (const p of dados.parcelas_diretas) {
     if (typeof p.valor !== "number" || p.valor < 0)
       return "Parcela: valor deve ser número não-negativo";
+    if (p.data && !isValidDateInput(p.data))
+      return `Parcela "${p.tipo}": data inválida ("${p.data}"). Use DD/MM/AAAA ou AAAA-MM-DD.`;
   }
+
+  // ─── Datas: rejeita inválidas pra evitar contrato com "31 de fevereiro" etc.
+  if (dados.data_assinatura && !isValidDateInput(dados.data_assinatura))
+    return `data_assinatura inválida ("${dados.data_assinatura}"). Use DD/MM/AAAA ou AAAA-MM-DD.`;
+  if (dados.data_escritura && !isValidDateInput(dados.data_escritura))
+    return `data_escritura inválida ("${dados.data_escritura}"). Use DD/MM/AAAA ou AAAA-MM-DD.`;
 
   // corretores
   if (dados.corretores) {
