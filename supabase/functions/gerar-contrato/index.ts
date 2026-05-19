@@ -14,6 +14,7 @@ const CALIBRI_12 = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"
 // Placeholders that should be replaced without bold formatting
 const NO_BOLD_PLACEHOLDERS = new Set([
   "«COMPRADORA»", "«IMOBILIARIA»", "«ASS_1»", "«ASS_2»", "«TIPO_ASS»",
+  "«Data_Assinatura»", "«FORMA_DE_ASSINATURA»",
 ]);
 
 // ─── TIPOS ───────────────────────────────────────────────────────────────────
@@ -957,6 +958,45 @@ function montarCompradora(dados: ContratoRequest): string {
 
 // ─── DOCX: SUBSTITUIÇÃO E MERGE ──────────────────────────────────────────────
 
+// Aplica negrito + centralização à linha de cabeçalho da tabela de corretores
+// (tr imediatamente antes da linha modelo do «CORRETOR_EMPRESA»).
+function boldifyCorretorHeader(xml: string): string {
+  const idx = xml.indexOf("«CORRETOR_EMPRESA»");
+  if (idx === -1) return xml;
+  const modelTrStart = xml.lastIndexOf("<w:tr", idx);
+  if (modelTrStart === -1) return xml;
+  // Localiza tr anterior (cabeçalho)
+  let headerStart = -1;
+  let pos = modelTrStart - 1;
+  while (pos > 0) {
+    const candidate = xml.lastIndexOf("<w:tr", pos);
+    if (candidate === -1) break;
+    const ch = xml[candidate + 4];
+    if (ch === ">" || ch === " ") { headerStart = candidate; break; }
+    pos = candidate - 1;
+  }
+  if (headerStart === -1 || headerStart >= modelTrStart) return xml;
+
+  let headerXml = xml.substring(headerStart, modelTrStart);
+  // Centraliza
+  headerXml = headerXml.replace(/<w:jc\b[^>]*\/>/g, '<w:jc w:val="center"/>');
+  headerXml = headerXml.replace(/(<w:pPr>)([\s\S]*?)(<\/w:pPr>)/g, (m, open, content, close) =>
+    content.includes("<w:jc ") ? m : open + content + '<w:jc w:val="center"/>' + close
+  );
+  headerXml = headerXml.replace(/(<w:p\b[^>]*>)(?!<w:pPr\b)/g, '$1<w:pPr><w:jc w:val="center"/></w:pPr>');
+  // Negrito em todos os runs existentes
+  headerXml = headerXml.replace(/(<w:rPr>)([\s\S]*?)(<\/w:rPr>)/g, (m, open, content, close) => {
+    if (/<w:b\b/.test(content)) return m;
+    return open + content + "<w:b/><w:bCs/>" + close;
+  });
+  // Adiciona rPr com negrito em runs que não têm
+  headerXml = headerXml.replace(/(<w:r\b[^>]*>)(?![\s\S]{0,50}<w:rPr)(<w:t)/g,
+    '$1<w:rPr><w:b/><w:bCs/></w:rPr>$2'
+  );
+
+  return xml.substring(0, headerStart) + headerXml + xml.substring(modelTrStart);
+}
+
 function substituirCorretores(xml: string, corretores: Corretor[]): string {
   const total = corretores.reduce((sum, c) => sum + (c.valor || 0), 0);
 
@@ -969,9 +1009,13 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
     return xml.replaceAll("«TOTAL_COMISSAO»", formatar(total));
   }
 
+  // Aplica negrito no cabeçalho antes de qualquer manipulação dos offsets
+  xml = boldifyCorretorHeader(xml);
+  const idxAfterBold = xml.indexOf(marker);
+
   // Extrai o <w:tr> completo que contém o marcador
-  const trStart = xml.lastIndexOf("<w:tr", idx);
-  const trEnd   = xml.indexOf("</w:tr>", idx) + "</w:tr>".length;
+  const trStart = xml.lastIndexOf("<w:tr", idxAfterBold);
+  const trEnd   = xml.indexOf("</w:tr>", idxAfterBold) + "</w:tr>".length;
   if (trStart === -1 || trEnd === -1) {
     return xml.replaceAll("«TOTAL_COMISSAO»", formatar(total));
   }
@@ -995,6 +1039,8 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
   rowNorm = rowNorm.replace(/(<w:pPr>)([\s\S]*?)(<\/w:pPr>)/g, (m, open, content, close) =>
     content.includes("<w:jc ") ? m : open + content + '<w:jc w:val="center"/>' + close
   );
+  // Adiciona pPr com center em parágrafos que não têm pPr nenhum
+  rowNorm = rowNorm.replace(/(<w:p\b[^>]*>)(?!<w:pPr\b)/g, '$1<w:pPr><w:jc w:val="center"/></w:pPr>');
   // Força Calibri 12pt em todos os runs da linha
   rowNorm = rowNorm.replace(/(<w:rPr>)([\s\S]*?)(<\/w:rPr>)/g, (m, open, content, close) =>
     open + content + CALIBRI_12 + close
@@ -1074,6 +1120,36 @@ function escapeXml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+// Remove negrito de todos os runs do parágrafo que contém o placeholder.
+// Usado pra linha "Niterói, «Data_Assinatura»." onde o template tem bold no texto
+// estático ("Niterói, ", ".") além do placeholder.
+function removeNegritoParagrafo(xml: string, placeholder: string): string {
+  const idx = xml.indexOf(placeholder);
+  if (idx === -1) return xml;
+
+  // Localiza o <w:p> que contém o placeholder
+  let pStart = -1;
+  let pos = idx;
+  while (pos > 0) {
+    const candidate = xml.lastIndexOf("<w:p", pos);
+    if (candidate === -1) break;
+    const ch = xml[candidate + 4];
+    if (ch === ">" || ch === " ") { pStart = candidate; break; }
+    pos = candidate - 1;
+  }
+  if (pStart === -1) return xml;
+  const pEnd = xml.indexOf("</w:p>", idx) + "</w:p>".length;
+  if (pEnd <= pStart) return xml;
+
+  let para = xml.substring(pStart, pEnd);
+  // Remove <w:b/> e <w:bCs/> dos rPr existentes
+  para = para.replace(/(<w:rPr>)([\s\S]*?)(<\/w:rPr>)/g, (m, open, content, close) =>
+    open + content.replace(/<w:b\b[^>]*\/>/g, "").replace(/<w:bCs\b[^>]*\/>/g, "") + close
+  );
+
+  return xml.substring(0, pStart) + para + xml.substring(pEnd);
 }
 
 function stripMergeFields(xml: string): string {
@@ -1494,6 +1570,8 @@ serve(async (req) => {
     xml1 = substituirComunicacao(xml1, dados);
 
     xml2 = addPageBreakBefore(xml2, "E por assim se acharem");
+    // Remove negrito do parágrafo "Niterói, [DATA]." antes de substituir
+    xml2 = removeNegritoParagrafo(xml2, "«Data_Assinatura»");
     xml2 = substituir(xml2, {
       "«ASS_1»":           ass1,
       "«ASS_2»":           ass2,
