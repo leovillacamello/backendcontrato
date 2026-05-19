@@ -152,6 +152,10 @@ interface ContratoRequest {
   imobiliarias?: Imobiliaria[];
   parcela_desconto_manual?: string;
   sem_comissao?: boolean;
+  // Quando true, valida CPF/CNPJ por formato mas NÃO bloqueia dígito verificador
+  // inválido (caso de uso: testes com documentos fictícios). Server loga warning
+  // com user_email para auditoria.
+  bypass_documento_invalido?: boolean;
 }
 
 // ─── EMPREENDIMENTOS ─────────────────────────────────────────────────────────
@@ -620,6 +624,78 @@ function parseDateParts(dateStr: string | undefined | null): { d: number; m: num
 function isValidDateInput(dateStr: string | undefined | null): boolean {
   if (!dateStr) return true; // vazio é ok (campo opcional)
   return parseDateParts(dateStr) !== null;
+}
+
+// ─── Validação de CPF/CNPJ (espelho de utils/formatters.ts do frontend) ────
+function validarCPF(cpf: string): boolean {
+  const d = cpf.replace(/\D/g, "");
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false;
+  const calc = (len: number): number => {
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += parseInt(d[i]) * (len + 1 - i);
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return calc(9) === parseInt(d[9]) && calc(10) === parseInt(d[10]);
+}
+
+function validarCNPJ(cnpj: string): boolean {
+  const d = cnpj.replace(/\D/g, "");
+  if (d.length !== 14 || /^(\d)\1{13}$/.test(d)) return false;
+  const calc = (len: number): number => {
+    const pesos = len === 12
+      ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+      : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    let sum = 0;
+    for (let i = 0; i < len; i++) sum += parseInt(d[i]) * pesos[i];
+    const r = sum % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return calc(12) === parseInt(d[12]) && calc(13) === parseInt(d[13]);
+}
+
+// Retorna lista de descrições de documentos inválidos no payload. Só checa
+// documentos COMPLETOS (11/14 dígitos) — vazios ou parciais não geram erro.
+function getDocsInvalidos(dados: ContratoRequest): string[] {
+  const errors: string[] = [];
+  if (Array.isArray(dados.slots)) {
+    dados.slots.forEach((s, idx) => {
+      if (s.tipo === "PJ") {
+        const cnpj = (s as PJSlot).cnpj || "";
+        if (cnpj.replace(/\D/g, "").length === 14 && !validarCNPJ(cnpj))
+          errors.push(`Comprador ${idx + 1} (${(s as PJSlot).razao_social || "PJ"}): CNPJ inválido`);
+        const repCpf = (s as PJSlot).representante?.cpf || "";
+        if (repCpf.replace(/\D/g, "").length === 11 && !validarCPF(repCpf))
+          errors.push(`Comprador ${idx + 1} > Representante: CPF inválido`);
+      } else {
+        const pf = s as PFSlot;
+        if ((pf.cpf || "").replace(/\D/g, "").length === 11 && !validarCPF(pf.cpf))
+          errors.push(`Comprador ${idx + 1} (${pf.nome || "PF"}): CPF inválido`);
+        const parc = pf.parceiro?.cpf || "";
+        if (pf.parceiro && parc.replace(/\D/g, "").length === 11 && !validarCPF(parc))
+          errors.push(`Comprador ${idx + 1} > Parceiro: CPF inválido`);
+      }
+    });
+  } else if (Array.isArray(dados.compradores)) {
+    dados.compradores.forEach((c, idx) => {
+      if ((c.cpf || "").replace(/\D/g, "").length === 11 && !validarCPF(c.cpf))
+        errors.push(`Comprador ${idx + 1} (${c.nome || ""}): CPF inválido`);
+    });
+  }
+  (dados.imobiliarias || []).forEach((im, idx) => {
+    const cn = (im.cnpj || "");
+    if (cn.replace(/\D/g, "").length === 14 && !validarCNPJ(cn))
+      errors.push(`Imobiliária ${idx + 1} (${im.nome || ""}): CNPJ inválido`);
+  });
+  (dados.corretores || []).forEach((co, idx) => {
+    const doc = (co.cpf_cnpj || "");
+    const len = doc.replace(/\D/g, "").length;
+    if (len === 11 && !validarCPF(doc))
+      errors.push(`Corretor ${idx + 1} (${co.nome || ""}): CPF inválido`);
+    if (len === 14 && !validarCNPJ(doc))
+      errors.push(`Corretor ${idx + 1} (${co.nome || ""}): CNPJ inválido`);
+  });
+  return errors;
 }
 
 function isoBR(dateStr: string): string {
@@ -1437,6 +1513,15 @@ function validarEntrada(dados: ContratoRequest): string | null {
   if (dados.data_escritura && !isValidDateInput(dados.data_escritura))
     return `data_escritura inválida ("${dados.data_escritura}"). Use DD/MM/AAAA ou AAAA-MM-DD.`;
 
+  // ─── CPF/CNPJ: bloqueia dígito verificador inválido a menos que o frontend
+  // tenha pedido bypass explícito (modal "Gerar mesmo assim" pra teste/fictício).
+  if (!dados.bypass_documento_invalido) {
+    const docsInvalidos = getDocsInvalidos(dados);
+    if (docsInvalidos.length > 0) {
+      return `Documento(s) inválido(s): ${docsInvalidos.join("; ")}. Corrija ou confirme "Gerar mesmo assim" no frontend.`;
+    }
+  }
+
   // corretores
   if (dados.corretores) {
     if (!Array.isArray(dados.corretores)) return "corretores deve ser um array";
@@ -1532,6 +1617,17 @@ serve(async (req) => {
         JSON.stringify({ error: erroValidacao }),
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
+    }
+
+    // Auditoria: se o frontend pediu bypass de documento inválido, registra
+    // no log com user_email + lista de docs problemáticos.
+    if (dados.bypass_documento_invalido) {
+      const docsInvalidos = getDocsInvalidos(dados);
+      if (docsInvalidos.length > 0) {
+        console.warn(
+          `[gerar-contrato] BYPASS doc inválido — user=${userEmail} (${userId}) sigla=${dados.sigla} docs=${JSON.stringify(docsInvalidos)}`,
+        );
+      }
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
