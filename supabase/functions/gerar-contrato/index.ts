@@ -110,7 +110,9 @@ interface RepresentanteSlot {
   nome: string;
   cpf?: string;
   sexo?: string;
+  nacionalidade?: string;
   profissao?: string;
+  estado_civil?: string;
   rg?: string;
   orgao_emissor?: string;
   data_emissao?: string;
@@ -625,11 +627,14 @@ function qualificarPJ(slot: PJSlot): string {
     const s   = (rep.sexo || "M") === "M" ? "M" : "F";
     const ins  = s === "M" ? "inscrito" : "inscrita";
     const por  = s === "M" ? "portador" : "portadora";
-    const nac  = ((rep as any).nacionalidade || (s === "M" ? "brasileiro" : "brasileira")).toLowerCase();
+    const nac  = (rep.nacionalidade || (s === "M" ? "brasileiro" : "brasileira")).toLowerCase();
+    const estado = rep.estado_civil ? `, ${rep.estado_civil.replace("(a)", "").trim()}` : "";
     const prof = rep.profissao ? `, ${rep.profissao}` : "";
-    const rg   = rep.rg ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}` : "";
+    const rg   = rep.rg
+      ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
+      : "";
     const cpfR = rep.cpf ? `, ${ins} no CPF/ME sob o nº ${rep.cpf}` : "";
-    repPart = `, neste ato representada por ${rep.nome}, ${nac}${prof}${cpfR}${rg}`;
+    repPart = `, neste ato representada por ${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
   }
   return `${slot.razao_social}${cnpj}${sede}${repPart}`;
 }
