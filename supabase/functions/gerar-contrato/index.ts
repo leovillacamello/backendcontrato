@@ -600,7 +600,9 @@ function dataExtenso(dateStr: string): string {
 
 // estadoCivilAntes=true para união estável (ordem: nac, estado, prof)
 // estadoCivilAntes=false (padrão) para demais casos (ordem: nac, prof, estado)
-function qualificar(c: Comprador, estadoCivilAntes = false): string {
+function qualificar(c: Comprador, estadoCivilAntes = true): string {
+  // Default: nacionalidade, estado civil, profissão (ordem do gabarito).
+  // estadoCivilAntes=false inverte para nacionalidade, profissão, estado civil (mantido por compatibilidade).
   const inscrito = (c.sexo || "M") === "M" ? "inscrito"  : "inscrita";
   const portador = (c.sexo || "M") === "M" ? "portador"  : "portadora";
   const nac      = (c.nacionalidade || "brasileiro(a)").toLowerCase();
