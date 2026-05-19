@@ -318,7 +318,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
   const sufixo = (tipo: string): string => {
     if ((contagem[tipo] || 0) <= 1) return "";
     indice[tipo] = (indice[tipo] || 0) + 1;
-    return ` (${ROMANOS[indice[tipo] - 1] ?? indice[tipo]})`;
+    return ` ${ROMANOS[indice[tipo] - 1] ?? indice[tipo]}`;
   };
 
 
