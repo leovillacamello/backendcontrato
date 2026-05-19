@@ -288,13 +288,30 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
   const textos: string[] = [];
   const temDescontoComp = descontoComp?.parcela === "complemento_30" || descontoComp?.parcela === "complemento_60";
   const comps = parcelas.filter(p => p.tipo === "complemento");
+  // Soma das qtds entre todas as linhas de complemento (lida com 1 linha qty=2 OU 2 linhas qty=1)
+  const totalCompQty = comps.reduce((s, c) => s + (c.qtd || 1), 0);
+  // Aplica desconto quando há comissão destacada com abatimento em complemento E pelo menos 2 complementos lógicos
+  const useDescontoComp = temDescontoComp && totalCompQty >= 2;
+  // Expande complementos em lista lógica de parcelas individuais para aplicar desconto
+  const compsLogicos: { valor: number; data: string; reajustavel: boolean }[] = [];
+  if (useDescontoComp) {
+    for (const c of comps) {
+      for (let i = 0; i < (c.qtd || 1); i++) {
+        compsLogicos.push({
+          valor: c.valor,
+          data: c.data || "",
+          reajustavel: c.reajustavel !== false,
+        });
+      }
+    }
+  }
   let compEmitido = false;
 
   // Contar quantas ocorrências de cada tipo haverá no texto (para sufixos romanos no label)
   const contagem: Record<string, number> = {};
   for (const p of parcelas) {
     if (p.tipo === "ato") continue;
-    if (p.tipo === "complemento" && temDescontoComp && comps.length >= 2) continue;
+    if (p.tipo === "complemento" && useDescontoComp) continue;
     contagem[p.tipo] = (contagem[p.tipo] || 0) + 1;
   }
   const indice: Record<string, number> = {};
@@ -308,18 +325,19 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
   for (const p of parcelas) {
     if (p.tipo === "ato") continue;
 
-    // Complemento com comissão destacada: agrupa os dois em um único item com valores diferentes
-    if (p.tipo === "complemento" && temDescontoComp && comps.length >= 2) {
+    // Complemento com comissão destacada: agrupa em um único item com valores diferentes
+    // (usa lista lógica expandida — funciona tanto pra 2 linhas qty=1 quanto pra 1 linha qty=2)
+    if (p.tipo === "complemento" && useDescontoComp) {
       if (!compEmitido) {
         compEmitido = true;
         const prefix = "";
         const comissao = descontoComp!.valor;
         const [val1, val2] = descontoComp!.parcela === "complemento_30"
-          ? [Math.max(0, comps[0].valor - comissao), comps[1].valor]
-          : [comps[0].valor, Math.max(0, comps[1].valor - comissao)];
+          ? [Math.max(0, compsLogicos[0].valor - comissao), compsLogicos[1].valor]
+          : [compsLogicos[0].valor, Math.max(0, compsLogicos[1].valor - comissao)];
         const total = val1 + val2;
-        const data1 = comps[0].data || "";
-        const reaj  = comps[0].reajustavel !== false ? "reajustáveis" : "fixas";
+        const data1 = compsLogicos[0].data || "";
+        const reaj  = compsLogicos[0].reajustavel ? "reajustáveis" : "fixas";
         textos.push(
           `${prefix}R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ` +
           `mensais, sucessivas, a primeira no valor de R$${formatar(val1)} (${extenso(val1)}) ` +
