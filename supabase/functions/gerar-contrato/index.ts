@@ -1040,6 +1040,52 @@ function boldifyCorretorHeader(xml: string): string {
   return xml.substring(0, headerStart) + headerXml + xml.substring(modelTrStart);
 }
 
+// Localiza runs standalone <w:r>...<w:t>(s)</w:t></w:r> ou <w:t>(m)</w:t> e os
+// ajusta com base na quantidade de corretores: singular → remove o run inteiro;
+// plural → troca "(s)"/"(m)" por "s"/"m" dentro do run. Esses markers aparecem
+// principalmente na seção "DA COMISSÃO DE CORRETAGEM" do template (ex:
+// "empresa(s) especializada(s)", "a(s) empresa(s) de venda").
+function fixCorretagemPluralMarkers(xml: string, count: number): string {
+  const isPlural = count > 1;
+  const markerEnd = /<w:t[^>]*>\((s|m)\)<\/w:t><\/w:r>/g;
+  type Item = { rStart: number; rEnd: number; letter: string };
+  const items: Item[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = markerEnd.exec(xml)) !== null) {
+    const matchPos = m.index;
+    // Procura o <w:r> imediato (não <w:rPr> nem <w:rsidR>) antes da posição
+    let rStart = -1;
+    let search = matchPos;
+    while (search > 0) {
+      const idx = xml.lastIndexOf("<w:r", search);
+      if (idx < 0) break;
+      const c = xml[idx + 4];
+      if (c === " " || c === ">") {
+        const firstClose = xml.indexOf("</w:r>", idx);
+        if (firstClose >= matchPos) {
+          rStart = idx;
+          break;
+        }
+      }
+      search = idx - 1;
+    }
+    if (rStart >= 0) {
+      items.push({ rStart, rEnd: m.index + m[0].length, letter: m[1] });
+    }
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (isPlural) {
+      const runText = xml.substring(it.rStart, it.rEnd);
+      const fixed = runText.replace(`(${it.letter})`, it.letter);
+      xml = xml.substring(0, it.rStart) + fixed + xml.substring(it.rEnd);
+    } else {
+      xml = xml.substring(0, it.rStart) + xml.substring(it.rEnd);
+    }
+  }
+  return xml;
+}
+
 function substituirCorretores(xml: string, corretores: Corretor[]): string {
   const total = corretores.reduce((sum, c) => sum + (c.valor || 0), 0);
 
@@ -1627,6 +1673,7 @@ serve(async (req) => {
     // ─── Corretores
     if (dados.corretores?.length) {
       xml1 = substituirCorretores(xml1, dados.corretores);
+      xml1 = fixCorretagemPluralMarkers(xml1, dados.corretores.length);
     }
 
     // ─── Strip Word MERGEFIELD field structures (keeps display text, removes field codes)
