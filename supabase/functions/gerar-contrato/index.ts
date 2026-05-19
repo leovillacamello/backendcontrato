@@ -74,6 +74,7 @@ interface ParceiroSlot {
   sexo?: string;
   nacionalidade?: string;
   profissao?: string;
+  estado_civil?: string;
   rg?: string;
   orgao_emissor?: string;
   data_emissao?: string;
@@ -635,11 +636,107 @@ function qualificarPJ(slot: PJSlot): string {
 
 // ─── QUALIFICAÇÃO PF COM PARCEIRO ─────────────────────────────────────────────
 
-function qualificarPFComParceiro(slot: PFSlot): string {
+// ─── HELPERS PARA UNIÃO ESTÁVEL ──────────────────────────────────────────────
+
+function genderStem(s: string): string {
+  if (!s) return "";
+  const first = s.toLowerCase().trim().split(/\s+/)[0];
+  return first.replace(/[ao]$/, "");
+}
+
+function pluralizeWord(word: string): string {
+  if (!word) return word;
+  const w = word.toLowerCase();
+  if (w.endsWith("ão")) return word.slice(0, -2) + "ões";
+  if (w.endsWith("m")) return word.slice(0, -1) + "ns";
+  if (w.endsWith("l")) {
+    if (/[aeiou]l$/.test(w)) return word.slice(0, -1) + "is";
+    return word + "es";
+  }
+  if (/[rzs]$/.test(w)) return word + "es";
+  return word + "s";
+}
+
+function pluralizeFirstWord(phrase: string): string {
+  if (!phrase) return phrase;
+  const parts = phrase.split(/\s+/);
+  parts[0] = pluralizeWord(parts[0]);
+  return parts.join(" ");
+}
+
+function pickMasc(s1: string, s2: string, sexo1?: string, sexo2?: string): string {
+  if (sexo1 === "M") return s1;
+  if (sexo2 === "M") return s2;
+  return s1 || s2;
+}
+
+// Multi-slot união estável: formato do gabarito (drops data da escritura do texto)
+function qualificarUniaoEstavelMultiSlot(c: Comprador, p2: Comprador, regime: string): string {
+  const estado1 = (c.estado_civil || "").replace("(a)", "").trim();
+  const estado2 = (p2.estado_civil || "").replace("(a)", "").trim();
+
+  const nac1 = (c.nacionalidade || "brasileiro").toLowerCase();
+  const nac2 = (p2.nacionalidade || "brasileira").toLowerCase();
+  const prof1 = (c.profissao || "").trim();
+  const prof2 = (p2.profissao || "").trim();
+
+  const sameNac = genderStem(nac1) === genderStem(nac2);
+  const sameProf = !!prof1 && !!prof2 && genderStem(prof1) === genderStem(prof2);
+
+  let header: string;
+  if (sameNac && sameProf) {
+    const nac = pickMasc(nac1, nac2, c.sexo, p2.sexo);
+    const prof = pickMasc(prof1, prof2, c.sexo, p2.sexo);
+    const namePart = `${c.nome}${estado1 ? ", " + estado1 : ""}, e ${p2.nome}${estado2 ? ", " + estado2 : ""}`;
+    header = `${namePart}, ${pluralizeFirstWord(nac)}, ${pluralizeFirstWord(prof)}`;
+  } else {
+    const part1 = `${c.nome}${estado1 ? ", " + estado1 : ""}, ${nac1}${prof1 ? ", " + prof1 : ""}`;
+    const part2 = `${p2.nome}${estado2 ? ", " + estado2 : ""}, ${nac2}${prof2 ? ", " + prof2 : ""}`;
+    header = `${part1}, e ${part2}`;
+  }
+
+  const regimePart = regime ? ` pelo regime da ${regime.toLowerCase()}` : "";
+  const middle = `, conviventes em união estável${regimePart}`;
+
+  const rg1 = c.rg, rg2 = p2.rg;
+  const d1 = c.data_emissao, d2 = p2.data_emissao;
+  const o1 = c.orgao_emissor, o2 = p2.orgao_emissor;
+
+  let rgPart = "";
+  if (rg1 && rg2) {
+    const sameDate = !!d1 && !!d2 && d1 === d2;
+    if (sameDate) {
+      rgPart = `, portadores das identidades nºs ${rg1}${o1 ? " do " + o1 : ""} e ${rg2}${o2 ? " do " + o2 : ""}${d1 ? " em " + isoBR(d1) : ""}`;
+    } else {
+      const p1Rg = `${rg1}${o1 ? " do " + o1 : ""}${d1 ? " em " + isoBR(d1) : ""}`;
+      const p2Rg = `${rg2}${o2 ? " do " + o2 : ""}${d2 ? " em " + isoBR(d2) : ""}`;
+      rgPart = `, portadores das identidades nºs ${p1Rg} e ${p2Rg}`;
+    }
+  } else if (rg1) {
+    rgPart = `, portador da identidade nº ${rg1}${o1 ? " do " + o1 : ""}${d1 ? " em " + isoBR(d1) : ""}`;
+  } else if (rg2) {
+    rgPart = `, portador da identidade nº ${rg2}${o2 ? " do " + o2 : ""}${d2 ? " em " + isoBR(d2) : ""}`;
+  }
+
+  const cpfPart = `, inscritos no CPF/ME sob os nºs ${c.cpf} e ${p2.cpf}`;
+
+  return header + middle + rgPart + cpfPart;
+}
+
+// Sem escritura: "X qualificado, que declara conviver em União Estável com Y qualificado [com REGIME]"
+function qualificarUniaoEstavelDeclara(c: Comprador, p2: Comprador, regime: string): string {
+  const q1 = qualificar(c);
+  const q2 = qualificar(p2);
+  const regimePart = regime ? ` com ${regime.toLowerCase()}` : "";
+  return `${q1}, que declara conviver em União Estável com ${q2}${regimePart}`;
+}
+
+function qualificarPFComParceiro(slot: PFSlot, multiSlot: boolean = false): string {
   const parc = slot.parceiro!;
   const c: Comprador = {
     nome: slot.nome, cpf: slot.cpf, sexo: slot.sexo,
     nacionalidade: slot.nacionalidade, profissao: slot.profissao,
+    estado_civil: slot.estado_civil,
     rg: slot.rg, orgao_emissor: slot.orgao_emissor, data_emissao: slot.data_emissao,
   };
 
@@ -653,48 +750,32 @@ function qualificarPFComParceiro(slot: PFSlot): string {
     return qualificarComConjuge({ ...c, conjuge });
   }
 
-  // União estável — 3 variações conforme regime e data de escritura
-  const pSexo   = (parc.sexo || "F") === "F" ? "F" : "M";
-  const regime  = (parc.regime || "").trim();
+  // União estável: 2 casos baseados em dataEscritura
+  const regime = (parc.regime || "").trim();
   const dataEsc = (parc.data_escritura || "").trim();
-
-  const cpfPart = `inscritos no CPF/ME sob os nºs ${slot.cpf} e ${parc.cpf}`;
-  const rg1 = rgStr(c), rg2 = rgStr(parc as any);
-  let rgPart = "";
-  if (rg1 && rg2) rgPart = `, portadores das identidades nºs ${rg1} e ${rg2}`;
-  else if (rg1)   rgPart = `, portador(a) da identidade nº ${rg1}`;
-  else if (rg2)   rgPart = `, portador(a) da identidade nº ${rg2}`;
+  const p2: Comprador = {
+    nome: parc.nome, cpf: parc.cpf, sexo: parc.sexo,
+    nacionalidade: parc.nacionalidade, profissao: parc.profissao,
+    estado_civil: parc.estado_civil,
+    rg: parc.rg, orgao_emissor: parc.orgao_emissor, data_emissao: parc.data_emissao,
+  };
 
   if (dataEsc) {
-    // Caso C: com data de escritura — formato (1)/(2), qualificação completa individual
-    const p2: Comprador = {
-      nome: parc.nome, cpf: parc.cpf, sexo: parc.sexo,
-      nacionalidade: parc.nacionalidade, profissao: parc.profissao,
-      rg: parc.rg, orgao_emissor: parc.orgao_emissor, data_emissao: parc.data_emissao,
-    };
+    // Caso 1: com escritura
+    if (multiSlot) {
+      // Multi-slot: gabarito format (drops data da escritura do texto)
+      return qualificarUniaoEstavelMultiSlot(c, p2, regime);
+    }
+    // Single-slot: (1)/(2) format com "conviver"
     return (
       `(1) ${qualificar(c)}; e (2) ${qualificar(p2)}, ` +
       `que declaram em ${dataExtenso(dataEsc)} através de Escritura de União Estável ` +
-      `viver sob o regime de ${regime.toLowerCase() || "comunhão parcial de bens"}`
+      `conviver sob o regime de ${regime.toLowerCase() || "comunhão parcial de bens"}`
     );
   }
 
-  if (regime) {
-    // Caso B: com regime mas sem data — "e sua mulher/marido ... conviventes em união estável pelo regime da X"
-    const conjLabel = pSexo === "F" ? "sua mulher" : "seu marido";
-    return (
-      `${qualificarSimples(c)}, e ${conjLabel} ${qualificarSimples(parc as any)}, ` +
-      `conviventes em união estável pelo regime da ${regime.toLowerCase()}, ` +
-      `${cpfPart}${rgPart}`
-    );
-  }
-
-  // Caso A: sem regime e sem data — "e NOME, conviventes em união estável"
-  return (
-    `${qualificarSimples(c)}, e ${qualificarSimples(parc as any)}, ` +
-    `conviventes em união estável, ` +
-    `${cpfPart}${rgPart}`
-  );
+  // Caso 2: sem escritura → "declara conviver"
+  return qualificarUniaoEstavelDeclara(c, p2, regime);
 }
 
 // ─── MONTAR COMPRADORA A PARTIR DE SLOTS ──────────────────────────────────────
@@ -738,7 +819,7 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
       : pf;
 
     const baseText = (hasPartner
-      ? qualificarPFComParceiro(pfForQualify)
+      ? qualificarPFComParceiro(pfForQualify, slots.length > 1)
       : qualificar(pfForQualify as unknown as Comprador)) + docText;
 
     // In "different addresses" mode: append address inline for each PF slot
