@@ -541,10 +541,26 @@ function formatarTelefone(tel: string): string {
 
 function isoBR(dateStr: string): string {
   if (!dateStr || dateStr.length !== 10) return dateStr;
+  // Já em formato BR (DD/MM/YYYY) — retorna como está
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) return dateStr;
   try {
     const [y, m, d] = dateStr.split("-");
     return `${d}/${m}/${y}`;
   } catch { return dateStr; }
+}
+
+// Aplica concordância de gênero ao estado civil ("solteiro" → "solteira" se F).
+// Aceita tanto "solteiro(a)" (placeholder) quanto "solteiro" / "solteira" já gendered.
+function genderEstado(estadoCivil: string | undefined, sexo: string | undefined): string {
+  if (!estadoCivil) return "";
+  const e = estadoCivil.trim().toLowerCase().replace(/\(a\)/g, "");
+  if (sexo !== "F") return e;
+  return e
+    .replace(/\bsolteiro\b/g, "solteira")
+    .replace(/\bcasado\b/g, "casada")
+    .replace(/\bdivorciado\b/g, "divorciada")
+    .replace(/\bviúvo\b/g, "viúva")
+    .replace(/\bviuvo\b/g, "viuva");
 }
 
 const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
@@ -570,8 +586,8 @@ function qualificar(c: Comprador, estadoCivilAntes = false): string {
   const inscrito = (c.sexo || "M") === "M" ? "inscrito"  : "inscrita";
   const portador = (c.sexo || "M") === "M" ? "portador"  : "portadora";
   const nac      = (c.nacionalidade || "brasileiro(a)").toLowerCase();
-  const prof     = (c.profissao || "").trim();
-  const estado   = c.estado_civil ? c.estado_civil.replace("(a)", "").trim() : "";
+  const prof     = (c.profissao || "").trim().toLowerCase();
+  const estado   = genderEstado(c.estado_civil, c.sexo);
   const midParts = estadoCivilAntes
     ? [estado, prof].filter(Boolean)
     : [prof, estado].filter(Boolean);
@@ -585,7 +601,7 @@ function qualificar(c: Comprador, estadoCivilAntes = false): string {
 
 function qualificarSimples(c: { nome: string; nacionalidade?: string; profissao?: string }): string {
   const nac   = (c.nacionalidade || "brasileiro(a)").toLowerCase();
-  const prof  = (c.profissao || "").trim();
+  const prof  = (c.profissao || "").trim().toLowerCase();
   const parts = [nac, prof].filter(Boolean);
   return `${c.nome}, ${parts.join(", ")}`;
 }
@@ -618,7 +634,7 @@ function qualificarComConjuge(c: Comprador): string {
 // ─── QUALIFICAÇÃO PJ ─────────────────────────────────────────────────────────
 
 function qualificarPJ(slot: PJSlot): string {
-  const cnpj = slot.cnpj ? `, inscrita no CNPJ/ME sob o nº ${slot.cnpj}` : "";
+  const cnpj = slot.cnpj ? `, pessoa jurídica inscrita no CNPJ sob o nº ${slot.cnpj}` : "";
   const sede  = slot.endereco_pj ? `, com sede à ${slot.endereco_pj}` : "";
   const rep   = slot.representante;
   let repPart = "";
@@ -627,13 +643,14 @@ function qualificarPJ(slot: PJSlot): string {
     const ins  = s === "M" ? "inscrito" : "inscrita";
     const por  = s === "M" ? "portador" : "portadora";
     const nac  = (rep.nacionalidade || (s === "M" ? "brasileiro" : "brasileira")).toLowerCase();
-    const estado = rep.estado_civil ? `, ${rep.estado_civil.replace("(a)", "").trim()}` : "";
-    const prof = rep.profissao ? `, ${rep.profissao}` : "";
+    const estadoStr = genderEstado(rep.estado_civil, rep.sexo);
+    const estado = estadoStr ? `, ${estadoStr}` : "";
+    const prof = rep.profissao ? `, ${rep.profissao.trim().toLowerCase()}` : "";
     const rg   = rep.rg
       ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
       : "";
     const cpfR = rep.cpf ? `, ${ins} no CPF sob o nº ${rep.cpf}` : "";
-    repPart = `, neste ato representada por ${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
+    repPart = `, neste ato representada por seu sócio ${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
   }
   return `${slot.razao_social}${cnpj}${sede}${repPart}`;
 }
@@ -676,13 +693,13 @@ function pickMasc(s1: string, s2: string, sexo1?: string, sexo2?: string): strin
 
 // Multi-slot união estável: formato do gabarito (drops data da escritura do texto)
 function qualificarUniaoEstavelMultiSlot(c: Comprador, p2: Comprador, regime: string): string {
-  const estado1 = (c.estado_civil || "").replace("(a)", "").trim();
-  const estado2 = (p2.estado_civil || "").replace("(a)", "").trim();
+  const estado1 = genderEstado(c.estado_civil, c.sexo);
+  const estado2 = genderEstado(p2.estado_civil, p2.sexo);
 
   const nac1 = (c.nacionalidade || "brasileiro").toLowerCase();
   const nac2 = (p2.nacionalidade || "brasileira").toLowerCase();
-  const prof1 = (c.profissao || "").trim();
-  const prof2 = (p2.profissao || "").trim();
+  const prof1 = (c.profissao || "").trim().toLowerCase();
+  const prof2 = (p2.profissao || "").trim().toLowerCase();
 
   const sameNac = genderStem(nac1) === genderStem(nac2);
   const sameProf = !!prof1 && !!prof2 && genderStem(prof1) === genderStem(prof2);
