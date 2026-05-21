@@ -124,7 +124,7 @@ interface PJSlot {
   razao_social: string;
   cnpj?: string;
   endereco_pj?: string;
-  representante?: RepresentanteSlot;
+  representantes?: RepresentanteSlot[];
 }
 
 type Slot = PFSlot | PJSlot;
@@ -560,7 +560,11 @@ function substituirComunicacao(xml: string, dados: ContratoRequest): string {
     : `<w:rPr>${CALIBRI_12}</w:rPr>`;
 
   const linhas: string[] = [];
-  if (dados.compradores[0]?.nome) linhas.push(`At.: ${escapeXml(dados.compradores[0].nome)}`);
+  const slot0 = dados.slots?.[0];
+  const atNome = slot0
+    ? (slot0.tipo === "PJ" ? slot0.razao_social : slot0.nome)
+    : dados.compradores[0]?.nome;
+  if (atNome) linhas.push(`At.: ${escapeXml(atNome)}`);
   if (dados.endereco)              linhas.push(`End.: ${escapeXml(dados.endereco)}`);
   if (dados.telefone)              linhas.push(`Tel.: ${escapeXml(formatarTelefone(dados.telefone))}`);
   if (dados.email)                 linhas.push(`E-mail: ${escapeXml(dados.email)}`);
@@ -664,9 +668,11 @@ function getDocsInvalidos(dados: ContratoRequest): string[] {
         const cnpj = (s as PJSlot).cnpj || "";
         if (cnpj.replace(/\D/g, "").length === 14 && !validarCNPJ(cnpj))
           errors.push(`Comprador ${idx + 1} (${(s as PJSlot).razao_social || "PJ"}): CNPJ inválido`);
-        const repCpf = (s as PJSlot).representante?.cpf || "";
-        if (repCpf.replace(/\D/g, "").length === 11 && !validarCPF(repCpf))
-          errors.push(`Comprador ${idx + 1} > Representante: CPF inválido`);
+        ((s as PJSlot).representantes || []).forEach((rep, ri) => {
+          const repCpf = rep?.cpf || "";
+          if (repCpf.replace(/\D/g, "").length === 11 && !validarCPF(repCpf))
+            errors.push(`Comprador ${idx + 1} > Representante ${ri + 1}: CPF inválido`);
+        });
       } else {
         const pf = s as PFSlot;
         if ((pf.cpf || "").replace(/\D/g, "").length === 11 && !validarCPF(pf.cpf))
@@ -790,24 +796,32 @@ function qualificarComConjuge(c: Comprador): string {
 
 // ─── QUALIFICAÇÃO PJ ─────────────────────────────────────────────────────────
 
+function qualificarRepresentante(rep: RepresentanteSlot): string {
+  const s   = (rep.sexo || "M") === "M" ? "M" : "F";
+  const ins  = s === "M" ? "inscrito" : "inscrita";
+  const por  = s === "M" ? "portador" : "portadora";
+  const nac  = (rep.nacionalidade || (s === "M" ? "brasileiro" : "brasileira")).toLowerCase();
+  const estadoStr = genderEstado(rep.estado_civil, rep.sexo);
+  const estado = estadoStr ? `, ${estadoStr}` : "";
+  const prof = rep.profissao ? `, ${rep.profissao.trim().toLowerCase()}` : "";
+  const rg   = rep.rg
+    ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
+    : "";
+  const cpfR = rep.cpf ? `, ${ins} no CPF sob o nº ${rep.cpf}` : "";
+  return `${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
+}
+
 function qualificarPJ(slot: PJSlot): string {
   const cnpj = slot.cnpj ? `, pessoa jurídica inscrita no CNPJ sob o nº ${slot.cnpj}` : "";
   const sede  = slot.endereco_pj ? `, com sede à ${slot.endereco_pj}` : "";
-  const rep   = slot.representante;
+  const reps = (slot.representantes || []).filter((r) => r?.nome);
   let repPart = "";
-  if (rep?.nome) {
-    const s   = (rep.sexo || "M") === "M" ? "M" : "F";
-    const ins  = s === "M" ? "inscrito" : "inscrita";
-    const por  = s === "M" ? "portador" : "portadora";
-    const nac  = (rep.nacionalidade || (s === "M" ? "brasileiro" : "brasileira")).toLowerCase();
-    const estadoStr = genderEstado(rep.estado_civil, rep.sexo);
-    const estado = estadoStr ? `, ${estadoStr}` : "";
-    const prof = rep.profissao ? `, ${rep.profissao.trim().toLowerCase()}` : "";
-    const rg   = rep.rg
-      ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
-      : "";
-    const cpfR = rep.cpf ? `, ${ins} no CPF sob o nº ${rep.cpf}` : "";
-    repPart = `, neste ato representada por seu sócio ${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
+  if (reps.length === 1) {
+    repPart = `, neste ato representada por seu representante legal ${qualificarRepresentante(reps[0])}`;
+  } else if (reps.length > 1) {
+    const partes = reps.map(qualificarRepresentante);
+    const ultimo = partes.pop();
+    repPart = `, neste ato representada por seus representantes legais ${partes.join(", ")}, e ${ultimo}`;
   }
   return `${slot.razao_social}${cnpj}${sede}${repPart}`;
 }
@@ -1350,6 +1364,96 @@ function stripMergeFields(xml: string): string {
   return xml;
 }
 
+// Lista de quem assina como COMPRADORA, na ordem dos compradores. Comprador
+// casado / em união estável → ele e o cônjuge assinam. PJ assina pela razão
+// social (a assinatura é do representante, mas o nome impresso é a empresa).
+function listarSignatarios(dados: ContratoRequest): string[] {
+  const nomes: string[] = [];
+  const slots = dados.slots ?? [];
+  if (slots.length) {
+    for (const s of slots) {
+      if (s.tipo === "PJ") {
+        if (s.razao_social) nomes.push(s.razao_social);
+      } else {
+        if (s.nome) nomes.push(s.nome);
+        if (s.parceiro?.nome) nomes.push(s.parceiro.nome);
+      }
+    }
+  } else {
+    for (const c of dados.compradores ?? []) {
+      if (c.nome) nomes.push(c.nome);
+      if (c.conjuge?.nome) nomes.push(c.conjuge.nome);
+    }
+  }
+  return nomes;
+}
+
+// Repete o bloco de assinatura do COMPRADOR uma vez por signatário.
+// No template a parte da COMPRADORA tem 2 blocos fixos («ASS_1» e «ASS_2»),
+// cada um = parágrafo do nome + parágrafo "COMPRADORA" + parágrafo vazio.
+// Esta função substitui esses 2 blocos por N, conforme a lista de signatários.
+function substituirAssinaturas(xml: string, nomes: string[]): string {
+  const idx1 = xml.indexOf("«ASS_1»");
+  if (idx1 === -1 || nomes.length === 0) return xml;
+
+  // Início do <w:p> (não <w:pPr>) que contém uma posição.
+  const inicioParagrafo = (pos: number): number => {
+    let p = pos;
+    while (p > 0) {
+      const c = xml.lastIndexOf("<w:p", p);
+      if (c === -1) return -1;
+      const ch = xml[c + 4];
+      if (ch === ">" || ch === " ") return c;
+      p = c - 1;
+    }
+    return -1;
+  };
+  const fimParagrafo = (pos: number): number => {
+    const e = xml.indexOf("</w:p>", pos);
+    return e === -1 ? -1 : e + "</w:p>".length;
+  };
+
+  const pNomeStart = inicioParagrafo(idx1);
+  const pNomeEnd   = fimParagrafo(idx1);        // parágrafo do nome «ASS_1»
+  if (pNomeStart === -1 || pNomeEnd === -1) return xml;
+  const pLabelEnd  = fimParagrafo(pNomeEnd);    // parágrafo "COMPRADORA"
+  const pEspEnd    = fimParagrafo(pLabelEnd);   // parágrafo vazio (espaçador)
+  if (pLabelEnd === -1 || pEspEnd === -1) return xml;
+
+  const paraNome      = xml.substring(pNomeStart, pNomeEnd);
+  const paraLabel     = xml.substring(pNomeEnd, pLabelEnd);
+  const paraEspacador = xml.substring(pLabelEnd, pEspEnd);
+
+  // Fim da região fixa: o bloco do 2º comprador, se o template o tiver.
+  let regiaoFim = pLabelEnd;
+  const idx2 = xml.indexOf("«ASS_2»", pLabelEnd);
+  if (idx2 !== -1) {
+    const pAss2End = fimParagrafo(idx2);
+    const pLabel2End = pAss2End !== -1 ? fimParagrafo(pAss2End) : -1;
+    if (pLabel2End !== -1) regiaoFim = pLabel2End;
+  }
+
+  // Remove IDs únicos do Word — copiar o mesmo parágrafo N vezes não pode
+  // duplicar paraId/textId.
+  const limparIds = (p: string): string => p
+    .replace(/\s*w14:paraId="[^"]*"/g, "")
+    .replace(/\s*w14:textId="[^"]*"/g, "")
+    .replace(/\s*w:rsidR="[^"]*"/g, "")
+    .replace(/\s*w:rsidRPr="[^"]*"/g, "")
+    .replace(/\s*w:rsidRDefault="[^"]*"/g, "");
+
+  const nomeBase  = limparIds(paraNome);
+  const labelBase = limparIds(paraLabel);
+  const espBase   = limparIds(paraEspacador);
+
+  const blocos = nomes.map((nome, i) => {
+    const para = nomeBase.replace("«ASS_1»", () => escapeXml((nome || "").toUpperCase()));
+    return para + labelBase + (i < nomes.length - 1 ? espBase : "");
+  }).join("");
+
+  return xml.substring(0, pNomeStart) + blocos + xml.substring(regiaoFim);
+}
+
 function substituir(xml: string, subs: Record<string, string>): string {
   let result = xml;
   for (const [placeholder, valor] of Object.entries(subs)) {
@@ -1743,7 +1847,6 @@ serve(async (req) => {
       : `${vias} (${VIAS_EXT[vias] ?? "duas"}) vias físicas de igual forma e teor`;
     const slotName = (s?: Slot) => !s ? "" : s.tipo === "PJ" ? s.razao_social : (s as PFSlot).nome || "";
     const ass1 = dados.slots?.length ? slotName(dados.slots[0]) : (dados.compradores[0]?.nome || "");
-    const ass2 = dados.slots?.length ? slotName(dados.slots[1]) : (dados.compradores[1]?.nome || "");
 
     // ─── Valores líquidos (destacada = preço e sinal já descontados da comissão)
     const totalComissao = dados.corretores?.length
@@ -1795,9 +1898,8 @@ serve(async (req) => {
     xml2 = addPageBreakBefore(xml2, "E por assim se acharem");
     // Remove negrito do parágrafo "Niterói, [DATA]." antes de substituir
     xml2 = removeNegritoParagrafo(xml2, "«Data_Assinatura»");
+    xml2 = substituirAssinaturas(xml2, listarSignatarios(dados));
     xml2 = substituir(xml2, {
-      "«ASS_1»":           ass1,
-      "«ASS_2»":           ass2,
       "«Data_Assinatura»": dataExtenso(dados.data_assinatura || ""),
       "«TIPO_ASS»":              tipoAssStr,
       "«FORMA_DE_ASSINATURA»":   tipoAssStr,
