@@ -289,34 +289,120 @@ function romano(n: number): string {
 
 const ROMANOS = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
 
+// Avança uma data BR (DD/MM/AAAA) em N meses preservando o dia.
+// Retorna "" se a data for inválida ou se o dia "transbordar" pro mês seguinte (ex.: 31/01 + 1 mês).
+function nextMonthDateBR(dataBR: string, monthsAhead: number): string {
+  const parts = parseDateParts(dataBR);
+  if (!parts) return "";
+  const dt = new Date(Date.UTC(parts.y, parts.m - 1 + monthsAhead, parts.d));
+  if (dt.getUTCDate() !== parts.d) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(dt.getUTCDate())}/${pad(dt.getUTCMonth() + 1)}/${dt.getUTCFullYear()}`;
+}
+
+// Mensal / semestral / anual: agrupa parcelas adjacentes idênticas em sequência natural
+// (mês+1 / mês+6 / ano+1). Complemento NÃO entra aqui — segue caminho próprio.
+function podeAgruparMSA(a: Parcela, b: Parcela): boolean {
+  if (a.tipo !== b.tipo) return false;
+  if (a.tipo !== "mensal" && a.tipo !== "semestral" && a.tipo !== "anual") return false;
+  if (a.valor !== b.valor) return false;
+  if ((a.reajustavel !== false) !== (b.reajustavel !== false)) return false;
+  const gap = a.tipo === "anual" ? 12 : a.tipo === "semestral" ? 6 : 1;
+  const proxData = nextMonthDateBR(a.data || "", gap * (a.qtd || 1));
+  return !!proxData && proxData === (b.data || "");
+}
+
+function agruparConsecutivas(parcelas: Parcela[]): Parcela[] {
+  const result: Parcela[] = [];
+  for (const p of parcelas) {
+    const last = result[result.length - 1];
+    if (last && podeAgruparMSA(last, p)) {
+      result[result.length - 1] = { ...last, qtd: (last.qtd || 1) + (p.qtd || 1) };
+    } else {
+      result.push({ ...p });
+    }
+  }
+  return result;
+}
+
+// Expande complementos em lista lógica de parcelas individuais
+// (cobre 1 linha qty=2 ou 2 linhas qty=1).
+function expandirComplementos(comps: Parcela[]): { valor: number; data: string; reajustavel: boolean }[] {
+  const out: { valor: number; data: string; reajustavel: boolean }[] = [];
+  for (const c of comps) {
+    const qty = c.qtd || 1;
+    let curData = c.data || "";
+    for (let i = 0; i < qty; i++) {
+      out.push({ valor: c.valor, data: curData, reajustavel: c.reajustavel !== false });
+      curData = nextMonthDateBR(curData, 1) || curData;
+    }
+  }
+  return out;
+}
+
+// Complemento de sinal sempre vai em 1 texto único (mesmo com valores diferentes).
+function emitirComplemento(logicos: { valor: number; data: string; reajustavel: boolean }[]): string {
+  const n = logicos.length;
+  if (n === 0) return "";
+  const reaj     = logicos[0].reajustavel ? "reajustáveis" : "fixas";
+  const reajUnit = logicos[0].reajustavel ? "reajustável" : "fixa";
+  const total    = logicos.reduce((s, l) => s + l.valor, 0);
+  const data1    = logicos[0].data || "";
+
+  if (n === 1) {
+    const v = logicos[0].valor;
+    return `R$${formatar(v)} (${extenso(v)}) serão pagos em 1 parcela ${reajUnit}, mensal, ` +
+      `no valor de R$${formatar(v)} (${extenso(v)}) com vencimento em ${data1} ("Parcelas de Complemento de Sinal");`;
+  }
+
+  const todosIguais = logicos.every(l => l.valor === logicos[0].valor);
+  if (todosIguais) {
+    const v = logicos[0].valor;
+    const demais      = n === 2 ? "a outra" : "as demais";
+    const subsequente = n === 2 ? "no mesmo dia do mês subsequente" : "no mesmo dia dos meses subsequentes";
+    return `R$${formatar(total)} (${extenso(total)}) serão pagos em ${n} parcelas ${reaj}, mensais, sucessivas, ` +
+      `no valor de R$${formatar(v)} (${extenso(v)}) cada uma delas, ` +
+      `vencendo-se a primeira no dia ${data1} e ${demais} ${subsequente} ("Parcelas de Complemento de Sinal");`;
+  }
+
+  // Valores distintos — caso típico n=2 (abatimento de comissão destacada em complemento).
+  if (n === 2) {
+    const [val1, val2] = [logicos[0].valor, logicos[1].valor];
+    return `R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ` +
+      `mensais, sucessivas, a primeira no valor de R$${formatar(val1)} (${extenso(val1)}) ` +
+      `vencendo-se a primeira no dia ${data1} e a outra no valor de R$${formatar(val2)} ` +
+      `(${extenso(val2)}) no mesmo dia do mês subsequente ("Parcelas de Complemento de Sinal");`;
+  }
+
+  // Fallback 3+ complementos com valores distintos (não ocorre em produção): lista cada um.
+  const partes = logicos.map(l => `R$${formatar(l.valor)} (${extenso(l.valor)}) em ${l.data}`).join("; ");
+  return `R$${formatar(total)} (${extenso(total)}) serão pagos em ${n} parcelas ${reaj}, mensais, sucessivas: ` +
+    `${partes} ("Parcelas de Complemento de Sinal");`;
+}
+
 function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; valor: number }): string[] {
   const textos: string[] = [];
   const temDescontoComp = descontoComp?.parcela === "complemento_30" || descontoComp?.parcela === "complemento_60";
-  const comps = parcelas.filter(p => p.tipo === "complemento");
-  // Soma das qtds entre todas as linhas de complemento (lida com 1 linha qty=2 OU 2 linhas qty=1)
-  const totalCompQty = comps.reduce((s, c) => s + (c.qtd || 1), 0);
-  // Aplica desconto quando há comissão destacada com abatimento em complemento E pelo menos 2 complementos lógicos
-  const useDescontoComp = temDescontoComp && totalCompQty >= 2;
-  // Expande complementos em lista lógica de parcelas individuais para aplicar desconto
-  const compsLogicos: { valor: number; data: string; reajustavel: boolean }[] = [];
-  if (useDescontoComp) {
-    for (const c of comps) {
-      for (let i = 0; i < (c.qtd || 1); i++) {
-        compsLogicos.push({
-          valor: c.valor,
-          data: c.data || "",
-          reajustavel: c.reajustavel !== false,
-        });
-      }
+
+  // Agrupa mensais/semestrais/anuais consecutivas; complemento segue caminho próprio.
+  const parcelasAg = agruparConsecutivas(parcelas);
+
+  const comps = parcelasAg.filter(p => p.tipo === "complemento");
+  const compsLogicos = expandirComplementos(comps);
+  if (temDescontoComp && compsLogicos.length >= 2) {
+    const comissao = descontoComp!.valor;
+    if (descontoComp!.parcela === "complemento_30") {
+      compsLogicos[0].valor = Math.max(0, compsLogicos[0].valor - comissao);
+    } else {
+      compsLogicos[1].valor = Math.max(0, compsLogicos[1].valor - comissao);
     }
   }
-  let compEmitido = false;
 
-  // Contar quantas ocorrências de cada tipo haverá no texto (para sufixos romanos no label)
+  // Complemento sempre vai em 1 bloco único — não conta pra sufixo romano.
   const contagem: Record<string, number> = {};
-  for (const p of parcelas) {
+  for (const p of parcelasAg) {
     if (p.tipo === "ato") continue;
-    if (p.tipo === "complemento" && useDescontoComp) continue;
+    if (p.tipo === "complemento") continue;
     contagem[p.tipo] = (contagem[p.tipo] || 0) + 1;
   }
   const indice: Record<string, number> = {};
@@ -326,34 +412,18 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     return ` ${ROMANOS[indice[tipo] - 1] ?? indice[tipo]}`;
   };
 
-
-  for (const p of parcelas) {
+  let compEmitido = false;
+  for (const p of parcelasAg) {
     if (p.tipo === "ato") continue;
 
-    // Complemento com comissão destacada: agrupa em um único item com valores diferentes
-    // (usa lista lógica expandida — funciona tanto pra 2 linhas qty=1 quanto pra 1 linha qty=2)
-    if (p.tipo === "complemento" && useDescontoComp) {
-      if (!compEmitido) {
+    if (p.tipo === "complemento") {
+      if (!compEmitido && compsLogicos.length > 0) {
         compEmitido = true;
-        const prefix = "";
-        const comissao = descontoComp!.valor;
-        const [val1, val2] = descontoComp!.parcela === "complemento_30"
-          ? [Math.max(0, compsLogicos[0].valor - comissao), compsLogicos[1].valor]
-          : [compsLogicos[0].valor, Math.max(0, compsLogicos[1].valor - comissao)];
-        const total = val1 + val2;
-        const data1 = compsLogicos[0].data || "";
-        const reaj  = compsLogicos[0].reajustavel ? "reajustáveis" : "fixas";
-        textos.push(
-          `${prefix}R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ` +
-          `mensais, sucessivas, a primeira no valor de R$${formatar(val1)} (${extenso(val1)}) ` +
-          `vencendo-se a primeira no dia ${data1} e a outra no valor de R$${formatar(val2)} ` +
-          `(${extenso(val2)}) no mesmo dia do mês subsequente ("Parcelas de Complemento de Sinal");`
-        );
+        textos.push(emitirComplemento(compsLogicos));
       }
       continue;
     }
 
-    const prefix = "";
     const qtd       = p.qtd || 1;
     const total     = p.valor * qtd;
     const valorUnit = formatar(p.valor);
@@ -366,24 +436,22 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
       const label = baseLabel + sufixo(p.tipo);
       const reajUnit = p.reajustavel !== false ? "reajustável" : "fixa";
       textos.push(
-        `${prefix}R$${valorUnit} (${extenso(p.valor)}) serão pagos em uma única ` +
+        `R$${valorUnit} (${extenso(p.valor)}) serão pagos em uma única ` +
         `parcela ${reajUnit} com vencimento em ${data} ("${label}");`
       );
       continue;
     }
 
-    // Caso singular: qtd === 1 para mensal/anual/semestral/complemento — texto sem "sucessivas/cada uma/as demais"
     if (qtd === 1) {
       const reajUnit = p.reajustavel !== false ? "reajustável" : "fixa";
       let periodSing: string;
       let baseDescSing: string;
       if (p.tipo === "anual")           { periodSing = "anual";     baseDescSing = "Parcelas Anuais"; }
       else if (p.tipo === "semestral")  { periodSing = "semestral"; baseDescSing = "Parcelas Semestrais"; }
-      else if (p.tipo === "complemento"){ periodSing = "mensal";    baseDescSing = "Parcelas de Complemento de Sinal"; }
       else                              { periodSing = "mensal";    baseDescSing = "Parcelas Mensais"; }
       const descSing = baseDescSing + sufixo(p.tipo);
       textos.push(
-        `${prefix}R$${valorTot} (${extenso(total)}) serão pagos em 1 parcela ${reajUnit}, ` +
+        `R$${valorTot} (${extenso(total)}) serão pagos em 1 parcela ${reajUnit}, ` +
         `${periodSing}, no valor de R$${valorUnit} (${extenso(p.valor)}) com vencimento em ${data} ("${descSing}");`
       );
       continue;
@@ -391,16 +459,15 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
 
     let baseDescricao: string, period: string, subsequente: string;
     const demais = qtd === 2 ? "a outra" : "as demais";
-    if      (p.tipo === "mensal")      { baseDescricao = "Parcelas Mensais";                 period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
-    else if (p.tipo === "anual")       { baseDescricao = "Parcelas Anuais";                  period = "anuais";     subsequente = "no mesmo dia dos anos subsequentes"; }
-    else if (p.tipo === "semestral")   { baseDescricao = "Parcelas Semestrais";              period = "semestrais"; subsequente = "no mesmo dia de seis em seis meses"; }
-    else if (p.tipo === "complemento") { baseDescricao = "Parcelas de Complemento de Sinal"; period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
-    else                               { baseDescricao = "Parcelas";                          period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente"          : "no mesmo dia dos meses subsequentes"; }
+    if      (p.tipo === "mensal")    { baseDescricao = "Parcelas Mensais";    period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente" : "no mesmo dia dos meses subsequentes"; }
+    else if (p.tipo === "anual")     { baseDescricao = "Parcelas Anuais";     period = "anuais";     subsequente = "no mesmo dia dos anos subsequentes"; }
+    else if (p.tipo === "semestral") { baseDescricao = "Parcelas Semestrais"; period = "semestrais"; subsequente = "no mesmo dia de seis em seis meses"; }
+    else                             { baseDescricao = "Parcelas";            period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente" : "no mesmo dia dos meses subsequentes"; }
 
     const descricao = baseDescricao + sufixo(p.tipo);
 
     textos.push(
-      `${prefix}R$${valorTot} (${extenso(total)}) serão pagos em ${qtd} parcelas ` +
+      `R$${valorTot} (${extenso(total)}) serão pagos em ${qtd} parcelas ` +
       `${reaj}, ${period}, sucessivas, no valor de R$${valorUnit} (${extenso(p.valor)}) ` +
       `cada uma delas, vencendo-se a primeira no dia ${data} e ${demais} ${subsequente} ("${descricao}");`
     );
@@ -1042,11 +1109,11 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
   const last = numbered.pop()!;
 
   if (useSharedAtEnd && sharedAddr) {
-    return `${numbered.join("; ")}; e ${last}, residentes à ${sharedAddr}`;
+    return `${numbered.join("; ")}; ${last}, residentes à ${sharedAddr}`;
   }
 
   // Different addresses — each PF already has their address inline
-  return `${numbered.join("; ")}; e ${last}`;
+  return `${numbered.join("; ")}; ${last}`;
 }
 
 function montarImobiliaria(imobiliarias: Imobiliaria[], preco: number): string {
@@ -1448,7 +1515,7 @@ function substituirAssinaturas(xml: string, nomes: string[]): string {
 
   const blocos = nomes.map((nome, i) => {
     const para = nomeBase.replace("«ASS_1»", () => escapeXml((nome || "").toUpperCase()));
-    return para + labelBase + (i < nomes.length - 1 ? espBase : "");
+    return para + labelBase + (i < nomes.length - 1 ? espBase + espBase : "");
   }).join("");
 
   return xml.substring(0, pNomeStart) + blocos + xml.substring(regiaoFim);
