@@ -1556,7 +1556,7 @@ function listarSignatarios(dados: ContratoRequest): string[] {
 // No template a parte da COMPRADORA tem 2 blocos fixos («ASS_1» e «ASS_2»),
 // cada um = parágrafo do nome + parágrafo "COMPRADORA" + parágrafo vazio.
 // Esta função substitui esses 2 blocos por N, conforme a lista de signatários.
-function substituirAssinaturas(xml: string, nomes: string[]): string {
+function substituirAssinaturas(xml: string, nomes: string[], tagsAdobe = false): string {
   const idx1 = xml.indexOf("«ASS_1»");
   if (idx1 === -1 || nomes.length === 0) return xml;
 
@@ -1612,10 +1612,93 @@ function substituirAssinaturas(xml: string, nomes: string[]): string {
 
   const blocos = nomes.map((nome, i) => {
     const para = nomeBase.replace("«ASS_1»", () => escapeXml((nome || "").toUpperCase()));
-    return para + labelBase + (i < nomes.length - 1 ? espBase + espBase : "");
+    // Modo Adobe: marcação de assinatura do comprador i (signer i+1) acima do nome.
+    const tag = tagsAdobe ? paraTagAssinatura(`comp${i + 1}`, i + 1) : "";
+    return tag + para + labelBase + (i < nomes.length - 1 ? espBase + espBase : "");
   }).join("");
 
   return xml.substring(0, pNomeStart) + blocos + xml.substring(regiaoFim);
+}
+
+// ─── MODO ADOBE: marcações (text tags) de assinatura na última página ─────────
+// Tag do Adobe Acrobat Sign: {{campo_es_:signerN:signature}} — o Adobe troca por
+// um campo de assinatura do signatário N (ordem dos destinatários do acordo).
+function tagAdobeSig(field: string, signer: number): string {
+  return `{{${field}_es_:signer${signer}:signature}}`;
+}
+function runTag(field: string, signer: number): string {
+  return `<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr>`
+    + `<w:t xml:space="preserve">${tagAdobeSig(field, signer)}</w:t></w:r>`;
+}
+// Parágrafo centralizado com uma tag de assinatura (usado acima do nome do comprador).
+function paraTagAssinatura(field: string, signer: number): string {
+  return `<w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr></w:pPr>${runTag(field, signer)}</w:p>`;
+}
+// Início do <w:p> (não <w:pPr>) em/antes de uma posição.
+function inicioParaAntes(xml: string, pos: number): number {
+  let p = pos;
+  while (p > 0) {
+    const c = xml.lastIndexOf("<w:p", p);
+    if (c === -1) return -1;
+    const ch = xml[c + 4];
+    if (ch === ">" || ch === " ") return c;
+    p = c - 1;
+  }
+  return -1;
+}
+// Marca os 2 diretores (lado a lado) acima do nome da VENDEDORA na página de
+// assinatura (última ocorrência de "VENDEDORA"). signers numComp+1 e numComp+2.
+function marcarDiretores(xml: string, numComp: number): string {
+  const labelIdx = xml.lastIndexOf("VENDEDORA</w:t>");
+  if (labelIdx === -1) return xml;
+  const labelParaStart = inicioParaAntes(xml, labelIdx);
+  if (labelParaStart === -1) return xml;
+  const empParaStart = inicioParaAntes(xml, labelParaStart - 1); // parágrafo do nome da SPE
+  if (empParaStart === -1) return xml;
+  const para = `<w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr></w:pPr>`
+    + runTag("dir1", numComp + 1)
+    + `<w:r><w:tab/><w:tab/><w:tab/></w:r>`
+    + runTag("dir2", numComp + 2)
+    + `</w:p>`;
+  return xml.substring(0, empParaStart) + para + xml.substring(empParaStart);
+}
+// Preenche Nome/CPF/Id das 2 testemunhas e marca a assinatura de cada uma.
+// signerBase = signer da 1ª testemunha (numComp+3).
+function preencherEMarcarTestemunhas(
+  xml: string,
+  testemunhas: { nome?: string; cpf?: string; rg?: string }[],
+  signerBase: number,
+): string {
+  const ini = xml.indexOf("Testemunhas:");
+  if (ini === -1 || testemunhas.length === 0) return xml;
+  const head = xml.substring(0, ini);
+  let reg = xml.substring(ini);
+
+  // Anexa um valor ao 1º label ainda não preenchido (Nome:/CPF:/Id:).
+  const fillNext = (label: string, value: string) => {
+    if (!value) return;
+    const alvo = `<w:t>${label}</w:t>`;
+    const k = reg.indexOf(alvo);
+    if (k === -1) return;
+    reg = reg.substring(0, k) + `<w:t xml:space="preserve">${label} ${escapeXml(value)}</w:t>` + reg.substring(k + alvo.length);
+  };
+  // Insere a tag de assinatura logo após o número "N." da testemunha.
+  const tagAposNumero = (num: string, field: string, signer: number) => {
+    const alvo = `<w:t>${num}</w:t></w:r>`;
+    const k = reg.indexOf(alvo);
+    if (k === -1) return;
+    reg = reg.substring(0, k) + `<w:t>${num}</w:t></w:r><w:r><w:tab/></w:r>` + runTag(field, signer) + reg.substring(k + alvo.length);
+  };
+
+  testemunhas.slice(0, 2).forEach((t, i) => {
+    const signer = signerBase + i;
+    tagAposNumero(`${i + 1}.`, `test${signer}`, signer);
+    fillNext("Nome:", t.nome || "");
+    fillNext("CPF:", t.cpf || "");
+    fillNext("Id:", t.rg || "");
+  });
+
+  return head + reg;
 }
 
 function substituir(xml: string, subs: Record<string, string>): string {
@@ -2143,7 +2226,19 @@ serve(async (req) => {
     xml2 = addPageBreakBefore(xml2, "E por assim se acharem");
     // Remove negrito do parágrafo "Niterói, [DATA]." antes de substituir
     xml2 = removeNegritoParagrafo(xml2, "«Data_Assinatura»");
-    xml2 = substituirAssinaturas(xml2, listarSignatarios(dados));
+    // Modo Adobe: insere as marcações (text tags) de assinatura na última página.
+    // Ordem dos signers: compradores (1..B) → diretores (B+1, B+2) → testemunhas (B+3, B+4).
+    const adobeOpts = (dados as unknown as {
+      assinatura_adobe?: { testemunhas?: { nome?: string; cpf?: string; rg?: string }[] };
+    }).assinatura_adobe;
+    const modoAdobe = !!adobeOpts;
+    const numCompradores = listarSignatarios(dados).length;
+
+    xml2 = substituirAssinaturas(xml2, listarSignatarios(dados), modoAdobe);
+    if (modoAdobe) {
+      xml2 = marcarDiretores(xml2, numCompradores);
+      xml2 = preencherEMarcarTestemunhas(xml2, adobeOpts!.testemunhas || [], numCompradores + 3);
+    }
     xml2 = substituir(xml2, {
       "«Data_Assinatura»": dataExtenso(dados.data_assinatura || ""),
       "«TIPO_ASS»":              tipoAssStr,
