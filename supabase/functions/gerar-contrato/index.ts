@@ -1705,33 +1705,16 @@ function preencherEMarcarTestemunhas(
 // em toda página. Um campo por comprador (mesmo nome em todas as páginas = o
 // Adobe vincula: assina uma vez, aparece em todas). signers 1..numComp.
 function montarRubricaFooter(numComp: number): string {
-  // Texto com a(s) marcação(ões) de rubrica (uma por comprador), lado a lado.
-  let tagsTexto = "";
-  for (let i = 0; i < numComp; i++) {
-    if (i > 0) tagsTexto += "      ";
-    tagsTexto += `{{rub${i + 1}_es_:signer${i + 1}:signature}}`;
-  }
+  // Rubrica do comprador no rodapé — repete em todas as páginas (inclusive a
+  // última, por decisão). Um campo por comprador, lado a lado.
   const rPr = `<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr>`;
-  // Campo condicional do Word: IF { PAGE } = { NUMPAGES } "" "<tags>".
-  // Na última página do documento (página de assinatura), PAGE = NUMPAGES → vazio
-  // (sem rubrica). Nas demais → mostra a(s) rubrica(s). Mantém a numeração intacta.
-  // O "resultado em cache" (após o separate) traz as tags, então por padrão aparecem.
-  const campo =
-    `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r>` +
-    `<w:r>${rPr}<w:instrText xml:space="preserve"> IF </w:instrText></w:r>` +
-    `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r>` +
-    `<w:r>${rPr}<w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>` +
-    `<w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>` +
-    `<w:r>${rPr}<w:instrText xml:space="preserve"> = </w:instrText></w:r>` +
-    `<w:r>${rPr}<w:fldChar w:fldCharType="begin"/></w:r>` +
-    `<w:r>${rPr}<w:instrText xml:space="preserve"> NUMPAGES </w:instrText></w:r>` +
-    `<w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>` +
-    `<w:r>${rPr}<w:instrText xml:space="preserve"> "" "${tagsTexto}" </w:instrText></w:r>` +
-    `<w:r>${rPr}<w:fldChar w:fldCharType="separate"/></w:r>` +
-    `<w:r>${rPr}<w:t xml:space="preserve">${tagsTexto}</w:t></w:r>` +
-    `<w:r>${rPr}<w:fldChar w:fldCharType="end"/></w:r>`;
+  let runs = "";
+  for (let i = 0; i < numComp; i++) {
+    if (i > 0) runs += `<w:r>${rPr}<w:t xml:space="preserve">      </w:t></w:r>`;
+    runs += `<w:r>${rPr}<w:t xml:space="preserve">{{rub${i + 1}_es_:signer${i + 1}:signature}}</w:t></w:r>`;
+  }
   // spacing before empurra pra baixo; ind left negativo joga pra esquerda (posição aprovada).
-  return `<w:p><w:pPr><w:spacing w:before="700" w:after="0"/><w:ind w:left="-1100"/><w:jc w:val="left"/>${rPr}</w:pPr>${campo}</w:p>`;
+  return `<w:p><w:pPr><w:spacing w:before="700" w:after="0"/><w:ind w:left="-1100"/><w:jc w:val="left"/>${rPr}</w:pPr>${runs}</w:p>`;
 }
 
 function substituir(xml: string, subs: Record<string, string>): string {
