@@ -325,6 +325,41 @@ function agruparConsecutivas(parcelas: Parcela[]): Parcela[] {
   return result;
 }
 
+// Agrupa parcelas mensal/semestral/anual com qty=1 cada, mesma reajustabilidade
+// e gap regular entre datas (1/6/12 meses) — mesmo com valores DIFERENTES.
+// Retorna lista de "blocos lógicos": cada bloco é 1 ou mais parcelas relacionadas.
+// Complemento NUNCA entra aqui — segue caminho próprio via emitirComplemento.
+function agruparPeriodicosDiferentes(parcelasAg: Parcela[]): Parcela[][] {
+  const blocos: Parcela[][] = [];
+  let i = 0;
+  while (i < parcelasAg.length) {
+    const p = parcelasAg[i];
+    const elegivel = (p.tipo === "mensal" || p.tipo === "semestral" || p.tipo === "anual") && (p.qtd || 1) === 1;
+    if (!elegivel) {
+      blocos.push([p]);
+      i++;
+      continue;
+    }
+    const gap = p.tipo === "anual" ? 12 : p.tipo === "semestral" ? 6 : 1;
+    const grupo: Parcela[] = [p];
+    let j = i + 1;
+    while (j < parcelasAg.length) {
+      const next = parcelasAg[j];
+      if (next.tipo !== p.tipo) break;
+      if ((next.qtd || 1) !== 1) break;
+      if ((next.reajustavel !== false) !== (p.reajustavel !== false)) break;
+      const lastData = grupo[grupo.length - 1].data || "";
+      const esperada = nextMonthDateBR(lastData, gap);
+      if (!esperada || esperada !== (next.data || "")) break;
+      grupo.push(next);
+      j++;
+    }
+    blocos.push(grupo);
+    i = j;
+  }
+  return blocos;
+}
+
 // Expande complementos em lista lógica de parcelas individuais
 // (cobre 1 linha qty=2 ou 2 linhas qty=1).
 function expandirComplementos(comps: Parcela[]): { valor: number; data: string; reajustavel: boolean }[] {
@@ -380,6 +415,48 @@ function emitirComplemento(logicos: { valor: number; data: string; reajustavel: 
     `${partes} ("Parcelas de Complemento de Sinal");`;
 }
 
+// Emite 1 parágrafo único para grupo de parcelas mensal/semestral/anual com qty=1 cada
+// e valores possivelmente DIFERENTES, mas com gap regular entre datas.
+// Complemento NÃO entra aqui — segue caminho próprio via emitirComplemento.
+function emitirGrupoPeriodico(parcelas: Parcela[], tipo: string, descricao: string): string {
+  // Guard defensivo: complemento NUNCA chega aqui (segue emitirComplemento)
+  if (tipo === "complemento") return "";
+
+  const n = parcelas.length;
+  if (n === 0) return "";
+
+  const reaj  = parcelas[0].reajustavel !== false ? "reajustáveis" : "fixas";
+  const total = parcelas.reduce((s, p) => s + p.valor, 0);
+  const data1 = parcelas[0].data || "";
+
+  let period: string;
+  let subsequente: string;
+  // n=2 usa concordância singular ("ano/mês subsequente"); n>=3 usa listagem com datas (não usa este campo).
+  if (tipo === "anual") {
+    period = "anuais";
+    subsequente = n === 2 ? "no mesmo dia do ano subsequente" : "no mesmo dia dos anos subsequentes";
+  } else if (tipo === "semestral") {
+    period = "semestrais";
+    subsequente = "no mesmo dia de seis em seis meses";
+  } else { // mensal
+    period = "mensais";
+    subsequente = n === 2 ? "no mesmo dia do mês subsequente" : "no mesmo dia dos meses subsequentes";
+  }
+
+  if (n === 2) {
+    const [v1, v2] = [parcelas[0].valor, parcelas[1].valor];
+    return `R$${formatar(total)} (${extenso(total)}) serão pagos em 2 (duas) parcelas ${reaj}, ${period}, sucessivas, ` +
+      `a primeira no valor de R$${formatar(v1)} (${extenso(v1)}) com vencimento em ${data1} ` +
+      `e a outra no valor de R$${formatar(v2)} (${extenso(v2)}) ${subsequente} ("${descricao}");`;
+  }
+
+  // n >= 3: lista cada parcela com sua data
+  const numerais: Record<number, string> = { 3:"três", 4:"quatro", 5:"cinco", 6:"seis", 7:"sete", 8:"oito", 9:"nove", 10:"dez" };
+  const numeralExt = numerais[n] || String(n);
+  const partes = parcelas.map(p => `R$${formatar(p.valor)} (${extenso(p.valor)}) em ${p.data || ""}`).join("; ");
+  return `R$${formatar(total)} (${extenso(total)}) serão pagos em ${n} (${numeralExt}) parcelas ${reaj}, ${period}, sucessivas: ${partes} ("${descricao}");`;
+}
+
 function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; valor: number }): string[] {
   const textos: string[] = [];
   const temDescontoComp = descontoComp?.parcela === "complemento_30" || descontoComp?.parcela === "complemento_60";
@@ -398,12 +475,18 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     }
   }
 
+  // Agrupa periódicos (mensal/semestral/anual) qty=1 com gap regular em "blocos lógicos"
+  // — mesmo com valores diferentes (caso típico: 2 semestrais intermediárias R$50k + R$80k).
+  const blocosLogicos = agruparPeriodicosDiferentes(parcelasAg);
+
   // Complemento sempre vai em 1 bloco único — não conta pra sufixo romano.
+  // Contagem é por BLOCO LÓGICO (um grupo de 2 semestrais conta como 1 bloco).
   const contagem: Record<string, number> = {};
-  for (const p of parcelasAg) {
-    if (p.tipo === "ato") continue;
-    if (p.tipo === "complemento") continue;
-    contagem[p.tipo] = (contagem[p.tipo] || 0) + 1;
+  for (const bloco of blocosLogicos) {
+    const tipo = bloco[0].tipo;
+    if (tipo === "ato") continue;
+    if (tipo === "complemento") continue;
+    contagem[tipo] = (contagem[tipo] || 0) + 1;
   }
   const indice: Record<string, number> = {};
   const sufixo = (tipo: string): string => {
@@ -413,7 +496,21 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
   };
 
   let compEmitido = false;
-  for (const p of parcelasAg) {
+  for (const bloco of blocosLogicos) {
+    // Grupo periódico com valores diferentes (2+ parcelas mensal/semestral/anual)
+    if (bloco.length > 1) {
+      const tipo = bloco[0].tipo;
+      // NUNCA chega aqui com complemento (agruparPeriodicosDiferentes só agrupa mensal/semestral/anual)
+      let baseDescGrupo: string;
+      if (tipo === "anual")          baseDescGrupo = "Parcelas Anuais";
+      else if (tipo === "semestral") baseDescGrupo = "Parcelas Semestrais";
+      else                           baseDescGrupo = "Parcelas Mensais";
+      const descricao = baseDescGrupo + sufixo(tipo);
+      textos.push(emitirGrupoPeriodico(bloco, tipo, descricao));
+      continue;
+    }
+
+    const p = bloco[0];
     if (p.tipo === "ato") continue;
 
     if (p.tipo === "complemento") {
@@ -460,7 +557,7 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
     let baseDescricao: string, period: string, subsequente: string;
     const demais = qtd === 2 ? "a outra" : "as demais";
     if      (p.tipo === "mensal")    { baseDescricao = "Parcelas Mensais";    period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente" : "no mesmo dia dos meses subsequentes"; }
-    else if (p.tipo === "anual")     { baseDescricao = "Parcelas Anuais";     period = "anuais";     subsequente = "no mesmo dia dos anos subsequentes"; }
+    else if (p.tipo === "anual")     { baseDescricao = "Parcelas Anuais";     period = "anuais";     subsequente = qtd === 2 ? "no mesmo dia do ano subsequente" : "no mesmo dia dos anos subsequentes"; }
     else if (p.tipo === "semestral") { baseDescricao = "Parcelas Semestrais"; period = "semestrais"; subsequente = "no mesmo dia de seis em seis meses"; }
     else                             { baseDescricao = "Parcelas";            period = "mensais";    subsequente = qtd === 2 ? "no mesmo dia do mês subsequente" : "no mesmo dia dos meses subsequentes"; }
 
@@ -1577,6 +1674,87 @@ function substituir(xml: string, subs: Record<string, string>): string {
   return result;
 }
 
+// Mescla imagens (e rels) do corpo (zip2) no zip1 antes do merge do document.xml.
+// Sem isso, a imagem do corpo aparece como "Não é possível exibir esta imagem" no .docx final,
+// porque o zipBase usa zip1 como base e perde os media files do zip2.
+// Renumera rIds do zip2 que conflitam com zip1 e renomeia arquivos de mídia em caso de colisão.
+// Atualiza xml2 com os novos rIds. Modifica zip1 in-place (mídia + rels).
+function mesclarMidiasCorpo(
+  zip1: Record<string, Uint8Array>,
+  zip2: Record<string, Uint8Array>,
+  xml2: string
+): string {
+  const relsKey = "word/_rels/document.xml.rels";
+  const baseRelsXml  = zip1[relsKey] ? strFromU8(zip1[relsKey]) : "";
+  const corpoRelsXml = zip2[relsKey] ? strFromU8(zip2[relsKey]) : "";
+  if (!corpoRelsXml || !baseRelsXml) return xml2;
+
+  // Coleta relationships de imagem do corpo
+  const imageRels: Array<{ oldRId: string; target: string }> = [];
+  // [^>]*? (lazy) permite que o Target contenha "/" (ex: "media/image1.png")
+  const relRegex = /<Relationship\b[^>]*?\/>/g;
+  let m: RegExpExecArray | null;
+  while ((m = relRegex.exec(corpoRelsXml)) !== null) {
+    const relText = m[0];
+    const idMatch     = relText.match(/Id="(rId\d+)"/);
+    const typeMatch   = relText.match(/Type="([^"]+)"/);
+    const targetMatch = relText.match(/Target="([^"]+)"/);
+    if (idMatch && typeMatch && targetMatch && typeMatch[1].includes("/image")) {
+      imageRels.push({ oldRId: idMatch[1], target: targetMatch[1] });
+    }
+  }
+  if (imageRels.length === 0) return xml2;
+
+  // Próximo rId disponível no zip1
+  const baseRIdNums = [...baseRelsXml.matchAll(/Id="rId(\d+)"/g)].map(x => parseInt(x[1]));
+  let nextRId = (baseRIdNums.length === 0 ? 0 : Math.max(...baseRIdNums)) + 1;
+
+  // Mídia existente no zip1 (pra evitar colisão de nome)
+  const existingMedia = new Set(Object.keys(zip1).filter(k => k.startsWith("word/media/")));
+
+  const IMAGE_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+  let newBaseRels  = baseRelsXml;
+  let updatedXml2  = xml2;
+
+  for (const rel of imageRels) {
+    const srcPath = `word/${rel.target}`;
+    if (!zip2[srcPath]) continue;
+
+    // Gera novo nome de arquivo se colidir
+    const oldFilename = rel.target.replace(/^media\//, "");
+    let newFilename = oldFilename;
+    if (existingMedia.has(`word/media/${newFilename}`)) {
+      const lastDot = newFilename.lastIndexOf(".");
+      const stem = lastDot >= 0 ? newFilename.substring(0, lastDot) : newFilename;
+      const ext  = lastDot >= 0 ? newFilename.substring(lastDot) : "";
+      let n = 2;
+      while (existingMedia.has(`word/media/${stem}_corpo${n}${ext}`)) n++;
+      newFilename = `${stem}_corpo${n}${ext}`;
+    }
+
+    // Copia o arquivo de mídia pro zip1
+    zip1[`word/media/${newFilename}`] = zip2[srcPath];
+    existingMedia.add(`word/media/${newFilename}`);
+
+    // Novo rId
+    const newRId = `rId${nextRId++}`;
+    const newTarget = `media/${newFilename}`;
+    newBaseRels = newBaseRels.replace(
+      "</Relationships>",
+      `<Relationship Id="${newRId}" Type="${IMAGE_TYPE}" Target="${newTarget}"/></Relationships>`
+    );
+
+    // Atualiza xml2 substituindo os rIds antigos pelos novos
+    const escRId = rel.oldRId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    updatedXml2 = updatedXml2
+      .replace(new RegExp(`r:embed="${escRId}"`, "g"), `r:embed="${newRId}"`)
+      .replace(new RegExp(`r:link="${escRId}"`,  "g"), `r:link="${newRId}"`);
+  }
+
+  zip1[relsKey] = strToU8(newBaseRels);
+  return updatedXml2;
+}
+
 function mesclarDocs(xml1: string, xml2: string): string {
   // Extrai conteúdo do body do doc2 sem o sectPr
   const bodyMatch = xml2.match(/<w:body>([\s\S]*?)<\/w:body>/);
@@ -1982,6 +2160,12 @@ serve(async (req) => {
     // ─── Strip Word MERGEFIELD field structures (keeps display text, removes field codes)
     xml1 = stripMergeFields(xml1);
     xml2 = stripMergeFields(xml2);
+
+    // ─── Copia mídia do corpo (zip2) para zip1 e renumera rIds que conflitam.
+    // Sem isso, imagens do corpo apareceriam quebradas ("Não é possível exibir esta imagem")
+    // porque o zipBase usa zip1 como base — rIds reusados pelo corpo apontariam para alvos
+    // errados (footer/hyperlink) na rels da cabeça.
+    xml2 = mesclarMidiasCorpo(zip1, zip2, xml2);
 
     // ─── Mesclar e recomprimir
     const xmlFinal = mesclarDocs(xml1, xml2);
