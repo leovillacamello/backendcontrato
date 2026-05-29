@@ -2373,8 +2373,9 @@ serve(async (req) => {
       const rubPara = montarRubricaFooter(numCompradores);
       for (const key of Object.keys(zipBase).filter((k) => k.startsWith("word/footer") && k.endsWith(".xml"))) {
         let f = strFromU8(zipBase[key]);
-        if (/<w:ftr[^>]*>/.test(f)) {
-          f = f.replace(/(<w:ftr[^>]*>)/, `$1${rubPara}`);
+        if (f.includes("</w:ftr>")) {
+          // insere como ÚLTIMO parágrafo do rodapé → canto inferior esquerdo
+          f = f.replace("</w:ftr>", `${rubPara}</w:ftr>`);
           zipBase[key] = strToU8(f);
         }
       }
