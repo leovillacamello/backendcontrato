@@ -1657,7 +1657,7 @@ function marcarDiretores(xml: string, numComp: number): string {
   if (empParaStart === -1) return xml;
   const para = `<w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr></w:pPr>`
     + runTag("dir1", numComp + 1)
-    + `<w:r><w:tab/><w:tab/><w:tab/></w:r>`
+    + `<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr><w:t xml:space="preserve">    </w:t></w:r>`
     + runTag("dir2", numComp + 2)
     + `</w:p>`;
   return xml.substring(0, empParaStart) + para + xml.substring(empParaStart);
@@ -1699,6 +1699,21 @@ function preencherEMarcarTestemunhas(
   });
 
   return head + reg;
+}
+
+// Parágrafo de rubrica (canto inferior esquerdo) para inserir no rodapé — repete
+// em toda página. Um campo por comprador (mesmo nome em todas as páginas = o
+// Adobe vincula: assina uma vez, aparece em todas). signers 1..numComp.
+function montarRubricaFooter(numComp: number): string {
+  let runs = "";
+  for (let i = 0; i < numComp; i++) {
+    if (i > 0) {
+      runs += `<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr><w:t xml:space="preserve">      </w:t></w:r>`;
+    }
+    runs += `<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr>`
+      + `<w:t xml:space="preserve">{{rub${i + 1}_es_:signer${i + 1}:signature}}</w:t></w:r>`;
+  }
+  return `<w:p><w:pPr><w:jc w:val="left"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr></w:pPr>${runs}</w:p>`;
 }
 
 function substituir(xml: string, subs: Record<string, string>): string {
@@ -2347,6 +2362,20 @@ serve(async (req) => {
               docXml.substring(0, lastSPIdx) + corpoSP + docXml.substring(spLen)
             );
           }
+        }
+      }
+    }
+
+    // Modo Adobe — PASSO 1 (d): rubrica do comprador no rodapé (repete em toda
+    // página). Por ora aparece também na última; a exclusão da última página
+    // (quebra de seção + rodapé limpo) é o passo 2.
+    if (modoAdobe) {
+      const rubPara = montarRubricaFooter(numCompradores);
+      for (const key of Object.keys(zipBase).filter((k) => k.startsWith("word/footer") && k.endsWith(".xml"))) {
+        let f = strFromU8(zipBase[key]);
+        if (/<w:ftr[^>]*>/.test(f)) {
+          f = f.replace(/(<w:ftr[^>]*>)/, `$1${rubPara}`);
+          zipBase[key] = strToU8(f);
         }
       }
     }
