@@ -96,14 +96,15 @@ serve(async (req) => {
   const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(jwt);
   if (authError || !user) return json({ error: "Token inválido ou expirado" }, 401);
 
-  let payload: { docx_base64?: string; file_name?: string; nome_acordo?: string; recipients?: Recipient[] };
+  let payload: { docx_base64?: string; file_name?: string; nome_acordo?: string; recipients?: Recipient[]; ccs?: string[] };
   try {
     payload = await req.json();
   } catch {
     return json({ error: "Body inválido" }, 400);
   }
 
-  const { docx_base64, file_name, nome_acordo, recipients } = payload;
+  const { docx_base64, file_name, nome_acordo, recipients, ccs } = payload;
+  const ccList = (ccs || []).filter((e) => e && /\S+@\S+\.\S+/.test(e));
   if (!docx_base64) return json({ error: "docx_base64 ausente" }, 400);
   const dests = (recipients || []).filter((r) => r?.email && /\S+@\S+\.\S+/.test(r.email));
   if (dests.length === 0) return json({ error: "Nenhum destinatário com e-mail válido" }, 400);
@@ -140,6 +141,7 @@ serve(async (req) => {
         order: r.order ?? (i + 1),
         role: r.role ?? "SIGNER",
       })),
+      ...(ccList.length ? { ccs: ccList.map((email) => ({ email })) } : {}),
       signatureType: "ESIGN",
       state: "IN_PROCESS",
     };
