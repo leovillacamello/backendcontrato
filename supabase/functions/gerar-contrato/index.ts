@@ -1713,7 +1713,8 @@ function montarRubricaFooter(numComp: number): string {
     runs += `<w:r><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr>`
       + `<w:t xml:space="preserve">{{rub${i + 1}_es_:signer${i + 1}:signature}}</w:t></w:r>`;
   }
-  return `<w:p><w:pPr><w:jc w:val="left"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr></w:pPr>${runs}</w:p>`;
+  // spacing before empurra a rubrica pra baixo; ind left negativo joga mais pra esquerda.
+  return `<w:p><w:pPr><w:spacing w:before="360" w:after="0"/><w:ind w:left="-340"/><w:jc w:val="left"/><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr></w:pPr>${runs}</w:p>`;
 }
 
 function substituir(xml: string, subs: Record<string, string>): string {
