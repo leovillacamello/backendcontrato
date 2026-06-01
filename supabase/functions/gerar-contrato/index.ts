@@ -79,6 +79,7 @@ interface ParceiroSlot {
   rg?: string;
   orgao_emissor?: string;
   data_emissao?: string;
+  email?: string;
   relacao: "casado" | "união estável";
   regime?: string;
   data_escritura?: string;
@@ -102,6 +103,7 @@ interface PFSlot {
   orgao_emissor?: string;
   data_emissao?: string;
   endereco?: string;
+  email?: string;
   oab?: OABSlot;
   doc_tipo?: string;
   parceiro?: ParceiroSlot;
@@ -117,6 +119,7 @@ interface RepresentanteSlot {
   rg?: string;
   orgao_emissor?: string;
   data_emissao?: string;
+  email?: string;
 }
 
 interface PJSlot {
@@ -281,11 +284,6 @@ function definirTipoComissao(preco: number, sinal: number, p30 = 0, p60 = 0, tax
 }
 
 // ─── PAGAMENTO ───────────────────────────────────────────────────────────────
-
-function romano(n: number): string {
-  const r = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"];
-  return n < r.length ? r[n] : String(n);
-}
 
 const ROMANOS = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
 
@@ -575,6 +573,10 @@ function linhasPagamento(parcelas: Parcela[], descontoComp?: { parcela: string; 
 // substituirPagamento: substitui o parágrafo «PAGAMENTO» por N parágrafos (um por parcela)
 function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { parcela: string; valor: number }): string {
   const linhas = linhasPagamento(parcelas, descontoComp);
+  // A última parcela do contrato fecha com ponto final (as demais terminam com ";").
+  if (linhas.length > 0) {
+    linhas[linhas.length - 1] = linhas[linhas.length - 1].replace(/;(\s*)$/, ".$1");
+  }
   const idx    = xml.indexOf("«PAGAMENTO»");
   if (idx === -1) return xml;
 
@@ -595,8 +597,7 @@ function substituirPagamento(xml: string, parcelas: Parcela[], descontoComp?: { 
 
   // Extrai <w:pPr> para reutilizar em cada novo parágrafo (remove numPr para não duplicar numeração)
   const pPrMatch = paraOrig.match(/<w:pPr\b[\s\S]*?<\/w:pPr>/);
-  const pPrRaw   = pPrMatch ? pPrMatch[0] : "";
-  const pPr      = pPrRaw;
+  const pPr      = pPrMatch ? pPrMatch[0] : "";
 
   // Extrai o numId do parágrafo original (se houver)
   const numIdMatch = pPr.match(/<w:numId\s+w:val="(\d+)"/);
@@ -972,7 +973,7 @@ function qualificarRepresentante(rep: RepresentanteSlot): string {
     ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
     : "";
   const cpfR = rep.cpf ? `, ${ins} no CPF sob o nº ${rep.cpf}` : "";
-  return `${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}`;
+  return `${rep.nome}, ${nac}${estado}${prof}${rg}${cpfR}${emailSuffix([rep.email])}`;
 }
 
 function qualificarPJ(slot: PJSlot): string {
@@ -1136,6 +1137,15 @@ function qualificarPFComParceiro(slot: PFSlot, multiSlot: boolean = false): stri
 
 // ─── MONTAR COMPRADORA A PARTIR DE SLOTS ──────────────────────────────────────
 
+// Sufixo de e-mail(s) para colar após o endereço na qualificação.
+// 0 → nada; 1 → "com endereço eletrônico: X"; 2+ → "com endereços eletrônicos: A B, respectivamente".
+function emailSuffix(emails: (string | undefined)[]): string {
+  const e = emails.map((x) => (x || "").trim()).filter(Boolean);
+  if (e.length === 0) return "";
+  if (e.length === 1) return `, com endereço eletrônico: ${e[0]}`;
+  return `, com endereços eletrônicos: ${e.join(" ")}, respectivamente`;
+}
+
 function montarCompradoraFromSlots(dados: ContratoRequest): string {
   const slots = dados.slots!;
 
@@ -1186,7 +1196,7 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     // In "different addresses" mode: append address inline for each PF slot
     if (!useSharedAtEnd && pfAddr) {
       const residente = hasPartner ? "residentes à" : "residente à";
-      return `${baseText}, ${residente} ${pfAddr}`;
+      return `${baseText}, ${residente} ${pfAddr}${emailSuffix([pf.email, pf.parceiro?.email])}`;
     }
 
     return baseText;
@@ -1198,7 +1208,8 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
     }
     const pf0 = slots[0] as PFSlot;
     const residente = pf0.parceiro ? "residentes à" : "residente à";
-    const suffix = sharedAddr ? `, ${residente} ${sharedAddr}` : "";
+    const emails = emailSuffix([pf0.email, pf0.parceiro?.email]);
+    const suffix = sharedAddr ? `, ${residente} ${sharedAddr}${emails}` : emails;
     return `${parts[0]}${suffix}`;
   }
 
@@ -1206,7 +1217,10 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
   const last = numbered.pop()!;
 
   if (useSharedAtEnd && sharedAddr) {
-    return `${numbered.join("; ")}; ${last}, residentes à ${sharedAddr}`;
+    const allEmails = slots.flatMap((s) =>
+      s.tipo === "PF" ? [(s as PFSlot).email, (s as PFSlot).parceiro?.email] : []
+    );
+    return `${numbered.join("; ")}; ${last}, residentes à ${sharedAddr}${emailSuffix(allEmails)}`;
   }
 
   // Different addresses — each PF already has their address inline
@@ -1451,6 +1465,11 @@ function substituirCorretores(xml: string, corretores: Corretor[]): string {
     pos = found + 1;
   }
 
+  // Caso o ",00" esteja colado no MESMO run do total (ex.: template SMK com
+  // «TOTAL_COMISSAO»,00 → "64.500,00,00"): a remoção de run separado acima não
+  // pega. Colapsa a vírgula-decimal duplicada do total diretamente no texto.
+  resultado = resultado.replaceAll(totalStr + ",00", totalStr);
+
   return resultado;
 }
 
@@ -1606,7 +1625,13 @@ function substituirAssinaturas(xml: string, nomes: string[], tagsAdobe = false):
     .replace(/\s*w:rsidRPr="[^"]*"/g, "")
     .replace(/\s*w:rsidRDefault="[^"]*"/g, "");
 
-  const nomeBase  = limparIds(paraNome);
+  // Normaliza a fonte do nome do comprador para Calibri — alguns templates trazem
+  // o «ASS_1» com fonte serifada, destoando do resto do documento. Troca só a
+  // família da fonte; preserva tamanho/negrito do template.
+  const CALIBRI_FONTS = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>';
+  const nomeBase  = limparIds(paraNome)
+    .replace(/<w:rFonts\b[^>]*\/>/g, CALIBRI_FONTS)
+    .replace(/<w:rPr>(?!\s*<w:rFonts)/g, "<w:rPr>" + CALIBRI_FONTS);
   const labelBase = limparIds(paraLabel);
   const espBase   = limparIds(paraEspacador);
 
