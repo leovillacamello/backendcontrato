@@ -919,6 +919,15 @@ function qualificar(c: Comprador, estadoCivilAntes = true): string {
   const midParts = estadoCivilAntes
     ? [estado, prof].filter(Boolean)
     : [prof, estado].filter(Boolean);
+  // CIN (Carteira de Identidade Nacional): não tem RG — o número do documento é o
+  // próprio CPF. O frontend marca esse caso com rg="-". Jurídico pede a forma
+  // "RG/CPF nº [CPF]" (sem citar "CIN"), com o órgão expedidor.
+  if (c.rg === "-") {
+    const orgaoCin = c.orgao_emissor ? `, expedido pelo ${c.orgao_emissor}` : "";
+    const idCin = `${portador} do RG/CPF nº ${c.cpf}${orgaoCin}`;
+    return `${c.nome}, ${nac}, ${midParts.join(", ")}, ${idCin}`;
+  }
+
   const cpfStr = `${inscrito} no CPF sob o nº ${c.cpf}`;
   const rgStr_ = c.rg
     ? `${portador} da identidade nº ${c.rg}${c.orgao_emissor ? ` do ${c.orgao_emissor}` : ""}${c.data_emissao ? ` em ${isoBR(c.data_emissao)}` : ""}`
@@ -935,7 +944,7 @@ function qualificarSimples(c: { nome: string; nacionalidade?: string; profissao?
 }
 
 function rgStr(c: { rg?: string; orgao_emissor?: string; data_emissao?: string }): string | null {
-  if (!c.rg) return null;
+  if (!c.rg || c.rg === "-") return null; // "-" = CIN (sem RG); tratado à parte
   let s = c.rg;
   if (c.orgao_emissor) s += ` do ${c.orgao_emissor}`;
   if (c.data_emissao)  s += ` em ${isoBR(c.data_emissao)}`;
@@ -969,7 +978,7 @@ function qualificarRepresentante(rep: RepresentanteSlot): string {
   const estadoStr = genderEstado(rep.estado_civil, rep.sexo);
   const estado = estadoStr ? `, ${estadoStr}` : "";
   const prof = rep.profissao ? `, ${rep.profissao.trim().toLowerCase()}` : "";
-  const rg   = rep.rg
+  const rg   = (rep.rg && rep.rg !== "-")
     ? `, ${por} da identidade nº ${rep.rg}${rep.orgao_emissor ? ` do ${rep.orgao_emissor}` : ""}${rep.data_emissao ? ` em ${isoBR(rep.data_emissao)}` : ""}`
     : "";
   const cpfR = rep.cpf ? `, ${ins} no CPF sob o nº ${rep.cpf}` : "";
@@ -1055,7 +1064,7 @@ function qualificarUniaoEstavelMultiSlot(c: Comprador, p2: Comprador, regime: st
   const regimePart = regime ? ` pelo regime da ${regime.toLowerCase()}` : "";
   const middle = `, conviventes em união estável${regimePart}`;
 
-  const rg1 = c.rg, rg2 = p2.rg;
+  const rg1 = c.rg === "-" ? "" : c.rg, rg2 = p2.rg === "-" ? "" : p2.rg; // "-" = CIN (sem RG)
   const d1 = c.data_emissao, d2 = p2.data_emissao;
   const o1 = c.orgao_emissor, o2 = p2.orgao_emissor;
 
