@@ -1691,7 +1691,10 @@ function substituirAssinaturas(xml: string, nomes: string[], tagsAdobe = false):
   const CALIBRI_FONTS = '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>';
   const nomeBase  = limparIds(paraNome)
     .replace(/<w:rFonts\b[^>]*\/>/g, CALIBRI_FONTS)
-    .replace(/<w:rPr>(?!\s*<w:rFonts)/g, "<w:rPr>" + CALIBRI_FONTS);
+    .replace(/<w:rPr>(?!\s*<w:rFonts)/g, "<w:rPr>" + CALIBRI_FONTS)
+    // Run SEM <w:rPr> (caso do «ASS_1»: <w:r><w:t>…</w:t></w:r>) — herdava a fonte
+    // padrão do documento (Times). Insere um rPr com Calibri antes do <w:t>.
+    .replace(/(<w:r\b[^>]*>)(?!\s*<w:rPr)(\s*<w:t)/g, `$1<w:rPr>${CALIBRI_FONTS}</w:rPr>$2`);
   const labelBase = limparIds(paraLabel);
   const espBase   = limparIds(paraEspacador);
 
