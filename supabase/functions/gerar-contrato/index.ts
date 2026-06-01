@@ -1793,16 +1793,35 @@ function preencherEMarcarTestemunhas(
 // em toda página. Um campo por comprador (mesmo nome em todas as páginas = o
 // Adobe vincula: assina uma vez, aparece em todas). signers 1..numComp.
 function montarRubricaFooter(numComp: number): string {
-  // Rubrica do comprador no rodapé — repete em todas as páginas (inclusive a
-  // última, por decisão). Um campo por comprador, lado a lado.
-  const rPr = `<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/></w:rPr>`;
-  let runs = "";
-  for (let i = 0; i < numComp; i++) {
-    if (i > 0) runs += `<w:r>${rPr}<w:t xml:space="preserve">      </w:t></w:r>`;
-    runs += `<w:r>${rPr}<w:t xml:space="preserve">{{rub${i + 1}_es_:signer${i + 1}:signature}}</w:t></w:r>`;
-  }
-  // spacing before empurra pra baixo; ind left negativo joga pra esquerda (posição aprovada).
-  return `<w:p><w:pPr><w:spacing w:before="700" w:after="0"/><w:ind w:left="-1100"/><w:jc w:val="left"/>${rPr}</w:pPr>${runs}</w:p>`;
+  // Rubrica do comprador no rodapé — repete em todas as páginas. Cada comprador
+  // ganha sua coluna numa tabela SEM BORDAS de N colunas iguais (100% da largura),
+  // garantindo que os campos fiquem sempre lado a lado, distribuídos por igual,
+  // sem sobrepor — independente de quantos compradores forem.
+  const n = Math.max(1, numComp);
+  const rPr = `<w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>`;
+  const pctEach = Math.floor(5000 / n);   // 5000 = 100% (cinquentésimos de %)
+  const colDxa  = Math.floor(9000 / n);   // largura nominal por coluna (autofit ajusta ao real)
+
+  const grid = Array.from({ length: n }, () => `<w:gridCol w:w="${colDxa}"/>`).join("");
+  const cells = Array.from({ length: n }, (_, i) =>
+    `<w:tc><w:tcPr><w:tcW w:w="${pctEach}" w:type="pct"/>` +
+      `<w:tcMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tcMar></w:tcPr>` +
+      `<w:p><w:pPr><w:spacing w:before="600" w:after="0"/><w:jc w:val="left"/>${rPr}</w:pPr>` +
+        `<w:r>${rPr}<w:t xml:space="preserve">{{rub${i + 1}_es_:signer${i + 1}:signature}}</w:t></w:r>` +
+      `</w:p></w:tc>`
+  ).join("");
+
+  const noBorders = `<w:tblBorders>` +
+    `<w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/>` +
+    `<w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders>`;
+
+  // Tabela + parágrafo vazio mínimo no fim (rodapé não pode terminar em tabela).
+  return `<w:tbl><w:tblPr>` +
+      `<w:tblW w:w="5000" w:type="pct"/>${noBorders}` +
+      `<w:tblLayout w:type="autofit"/>` +
+      `<w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>` +
+    `</w:tblPr><w:tblGrid>${grid}</w:tblGrid><w:tr>${cells}</w:tr></w:tbl>` +
+    `<w:p><w:pPr><w:spacing w:after="0" w:line="20" w:lineRule="exact"/></w:pPr></w:p>`;
 }
 
 function substituir(xml: string, subs: Record<string, string>): string {
