@@ -222,6 +222,22 @@ function formatarPercentual(valor: number): string {
   return valor.toFixed(2).replace(".", ",") + "%";
 }
 
+// Formata um CPF (11 dígitos) como 000.000.000-00. Qualquer outra coisa passa
+// intacta (ex.: já formatado, ou CNPJ).
+function formatarCPF(cpf: string): string {
+  const d = (cpf || "").replace(/\D/g, "");
+  if (d.length !== 11) return cpf;
+  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+}
+
+// Title Case para nome só citado (cônjuge no Caso 3). Conectores em minúsculo.
+function tituloNome(nome: string): string {
+  const minus = new Set(["de", "da", "do", "das", "dos", "e"]);
+  return (nome || "").trim().toLowerCase().split(/\s+/).filter(Boolean)
+    .map((w, i) => (i > 0 && minus.has(w)) ? w : w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 function extenso(valor: number): string {
   const un = ["","um","dois","três","quatro","cinco","seis","sete","oito","nove",
               "dez","onze","doze","treze","quatorze","quinze","dezesseis","dezessete","dezoito","dezenove"];
@@ -908,32 +924,49 @@ function dataExtenso(dateStr: string): string {
 
 // estadoCivilAntes=true para união estável (ordem: nac, estado, prof)
 // estadoCivilAntes=false (padrão) para demais casos (ordem: nac, prof, estado)
-function qualificar(c: Comprador, estadoCivilAntes = true): string {
-  // Default: nacionalidade, estado civil, profissão (ordem do gabarito).
-  // estadoCivilAntes=false inverte para nacionalidade, profissão, estado civil (mantido por compatibilidade).
+// Monta a cláusula de identidade ("portador(a) da identidade nº..., inscrito no
+// CPF..." ou, para CIN com rg="-", "portador(a) do RG/CPF nº..., expedido pelo...").
+// CPF sempre formatado.
+function clausulaIdentidade(c: Comprador): string {
   const inscrito = (c.sexo || "M") === "M" ? "inscrito"  : "inscrita";
   const portador = (c.sexo || "M") === "M" ? "portador"  : "portadora";
-  const nac      = (c.nacionalidade || "brasileiro(a)").toLowerCase();
-  const prof     = (c.profissao || "").trim().toLowerCase();
-  const estado   = genderEstado(c.estado_civil, c.sexo);
-  const midParts = estadoCivilAntes
-    ? [estado, prof].filter(Boolean)
-    : [prof, estado].filter(Boolean);
-  // CIN (Carteira de Identidade Nacional): não tem RG — o número do documento é o
-  // próprio CPF. O frontend marca esse caso com rg="-". Jurídico pede a forma
-  // "RG/CPF nº [CPF]" (sem citar "CIN"), com o órgão expedidor.
+  const cpf = formatarCPF(c.cpf || "");
+  // CIN (rg="-"): o número do documento é o próprio CPF → "RG/CPF nº [CPF]".
   if (c.rg === "-") {
     const orgaoCin = c.orgao_emissor ? `, expedido pelo ${c.orgao_emissor}` : "";
-    const idCin = `${portador} do RG/CPF nº ${c.cpf}${orgaoCin}`;
-    return `${c.nome}, ${nac}, ${midParts.join(", ")}, ${idCin}`;
+    return `${portador} do RG/CPF nº ${cpf}${orgaoCin}`;
   }
-
-  const cpfStr = `${inscrito} no CPF sob o nº ${c.cpf}`;
+  const cpfStr = `${inscrito} no CPF sob o nº ${cpf}`;
   const rgStr_ = c.rg
     ? `${portador} da identidade nº ${c.rg}${c.orgao_emissor ? ` do ${c.orgao_emissor}` : ""}${c.data_emissao ? ` em ${isoBR(c.data_emissao)}` : ""}`
     : "";
-  const idParts = [rgStr_, cpfStr].filter(Boolean).join(", ");
-  return `${c.nome}, ${nac}, ${midParts.join(", ")}, ${idParts}`;
+  return [rgStr_, cpfStr].filter(Boolean).join(", ");
+}
+
+function qualificar(c: Comprador, estadoCivilAntes = true): string {
+  const nac    = (c.nacionalidade || "brasileiro(a)").toLowerCase();
+  const prof   = (c.profissao || "").trim().toLowerCase();
+  const estado = genderEstado(c.estado_civil, c.sexo);
+  const midParts = estadoCivilAntes
+    ? [estado, prof].filter(Boolean)
+    : [prof, estado].filter(Boolean);
+  return `${c.nome}, ${nac}, ${midParts.join(", ")}, ${clausulaIdentidade(c)}`;
+}
+
+// Caso 3 (separação total, compra sozinho): o cônjuge é só NOMEADO na
+// qualificação — não é qualificado (sem CPF/RG/profissão) e não assina.
+// Ex.: "GLAUCIA..., brasileira, empresária, casada pelo regime da separação total
+// de bens com Fabiano Moreira Peixoto Fortuna, portadora do RG/CPF nº...".
+function qualificarComMencaoConjuge(c: Comprador): string {
+  const conj   = c.conjuge!;
+  const nac    = (c.nacionalidade || "brasileiro(a)").toLowerCase();
+  const prof   = (c.profissao || "").trim().toLowerCase();
+  const casado = (c.sexo || "M") === "F" ? "casada" : "casado";
+  const regime = (conj.regime_bens || "").toLowerCase();
+  const comNome = conj.nome ? ` com ${tituloNome(conj.nome)}` : "";
+  const estadoStr = regime ? `${casado} pelo regime da ${regime}${comNome}` : casado;
+  const midParts = [prof, estadoStr].filter(Boolean);
+  return `${c.nome}, ${nac}, ${midParts.join(", ")}, ${clausulaIdentidade(c)}`;
 }
 
 function qualificarSimples(c: { nome: string; nacionalidade?: string; profissao?: string }): string {
@@ -955,7 +988,7 @@ function qualificarComConjuge(c: Comprador): string {
   const conj = c.conjuge!;
   const conjLabel = (conj.sexo || "F") === "F" ? "sua mulher" : "seu marido";
   const regime = conj.regime_bens || "";
-  const cpfPart = `inscritos no CPF sob os nºs ${c.cpf} e ${conj.cpf}`;
+  const cpfPart = `inscritos no CPF sob os nºs ${formatarCPF(c.cpf)} e ${formatarCPF(conj.cpf)}`;
   const rg1 = rgStr(c), rg2 = rgStr(conj);
   let rgPart = "";
   if (rg1 && rg2) rgPart = `portadores das identidades nºs ${rg1} e ${rg2}`;
@@ -1084,7 +1117,7 @@ function qualificarUniaoEstavelMultiSlot(c: Comprador, p2: Comprador, regime: st
     rgPart = `, portador da identidade nº ${rg2}${o2 ? " do " + o2 : ""}${d2 ? " em " + isoBR(d2) : ""}`;
   }
 
-  const cpfPart = `, inscritos no CPF sob os nºs ${c.cpf} e ${p2.cpf}`;
+  const cpfPart = `, inscritos no CPF sob os nºs ${formatarCPF(c.cpf)} e ${formatarCPF(p2.cpf)}`;
 
   return header + middle + rgPart + cpfPart;
 }
@@ -1198,14 +1231,28 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
       ? { ...pf, rg: undefined, orgao_emissor: undefined, data_emissao: undefined } as unknown as PFSlot
       : pf;
 
-    const baseText = (hasPartner
-      ? qualificarPFComParceiro(pfForQualify, slots.length > 1)
-      : qualificar(pfForQualify as unknown as Comprador)) + docText;
+    // Caso 3 (separação total, só-menção): cônjuge nomeado, não qualificado nem
+    // assina. Tratado como comprador SOLO para endereço/e-mail/assinatura.
+    const parc = pf.parceiro;
+    const soMencao = !!(parc && (parc as { so_mencao?: boolean }).so_mencao);
+    const hasCoComprador = hasPartner && !soMencao;
+
+    let qualificado: string;
+    if (soMencao) {
+      const conjuge = { nome: parc!.nome, regime_bens: (parc as { regime?: string }).regime } as Conjuge;
+      qualificado = qualificarComMencaoConjuge({ ...(pfForQualify as unknown as Comprador), conjuge });
+    } else if (hasPartner) {
+      qualificado = qualificarPFComParceiro(pfForQualify, slots.length > 1);
+    } else {
+      qualificado = qualificar(pfForQualify as unknown as Comprador, false);
+    }
+    const baseText = qualificado + docText;
 
     // In "different addresses" mode: append address inline for each PF slot
     if (!useSharedAtEnd && pfAddr) {
-      const residente = hasPartner ? "residentes à" : "residente à";
-      return `${baseText}, ${residente} ${pfAddr}${emailSuffix([pf.email, pf.parceiro?.email])}`;
+      const residente = hasCoComprador ? "residentes à" : "residente à";
+      const emails = soMencao ? emailSuffix([pf.email]) : emailSuffix([pf.email, pf.parceiro?.email]);
+      return `${baseText}, ${residente} ${pfAddr}${emails}`;
     }
 
     return baseText;
@@ -1216,8 +1263,10 @@ function montarCompradoraFromSlots(dados: ContratoRequest): string {
       return parts[0]; // PJ tem sede embutida via qualificarPJ — não precisa "residente"
     }
     const pf0 = slots[0] as PFSlot;
-    const residente = pf0.parceiro ? "residentes à" : "residente à";
-    const emails = emailSuffix([pf0.email, pf0.parceiro?.email]);
+    const soMencao0 = !!(pf0.parceiro && (pf0.parceiro as { so_mencao?: boolean }).so_mencao);
+    const temCoComprador0 = !!pf0.parceiro && !soMencao0;
+    const residente = temCoComprador0 ? "residentes à" : "residente à";
+    const emails = temCoComprador0 ? emailSuffix([pf0.email, pf0.parceiro?.email]) : emailSuffix([pf0.email]);
     const suffix = sharedAddr ? `, ${residente} ${sharedAddr}${emails}` : emails;
     return `${parts[0]}${suffix}`;
   }
@@ -1568,7 +1617,9 @@ function listarSignatarios(dados: ContratoRequest): string[] {
         if (s.razao_social) nomes.push(s.razao_social);
       } else {
         if (s.nome) nomes.push(s.nome);
-        if (s.parceiro?.nome) nomes.push(s.parceiro.nome);
+        // Caso 3 (só-menção): cônjuge nomeado não assina.
+        const soMencao = (s.parceiro as { so_mencao?: boolean } | undefined)?.so_mencao;
+        if (s.parceiro?.nome && !soMencao) nomes.push(s.parceiro.nome);
       }
     }
   } else {
